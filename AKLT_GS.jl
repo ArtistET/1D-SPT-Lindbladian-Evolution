@@ -31,7 +31,7 @@ function parse_commandline()
             arg_type = Int
         "--Dstep"
             help = "The step of increasing maxdim in DMRG"
-            default = 100
+            default = 20
             arg_type = Int
         "--t1"
             help = "The in-ladder1 hopping t1"
@@ -66,11 +66,11 @@ function parse_commandline()
     return parse_args(s)
 end
 
-function generate_mps_path( N, t1, t2, tR, tD, J, U, D)
-    if !isdir("./psi/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(D)")
-         mkpath("./psi/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(D)")
+function generate_mps_path( N, t1, t2, tR, tD, J, U, D, Dstep)
+    if !isdir("./psi/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(D)/Dstep$(Dstep)")
+         mkpath("./psi/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(D)/Dstep$(Dstep)")
     end
-    mps_path="./psi/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(D)/AKLT_NN$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)_Dmax$(D).h5"
+    mps_path="./psi/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(D)/Dstep$(Dstep)/AKLT_NN$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)_Dmax$(D).h5"
     return mps_path
 end
 
@@ -146,13 +146,13 @@ function create_psi0(N::Int, load::Bool, mps_path)
     return psi0
 end
 
-function dmrg_GS(psi0, H, mps_path; eps=1e-10)
+function dmrg_GS(psi0, H, mps_path, initD, Dstep, Dmax; eps=1e-10)
     nsweeps = 1
     Elast   = Inf
     noise   = [1e-6]
     cutoff  = [0]
     for n = 1:400
-        maxdim = initD *(n-1)
+        maxdim = min(initD+Dstep*(n-1) , Dmax)
         energy, psi = dmrg(H, psi0; nsweeps, maxdim, cutoff, noise)
         if abs(Elast-energy) < eps
             break
@@ -160,6 +160,12 @@ function dmrg_GS(psi0, H, mps_path; eps=1e-10)
         Elast = energy
         save_checkpoint(psi, mps_path)
     end
+end
+
+function rotation_Z2() # to generate the Z2 rotation which needed in stirng order
+end
+
+function SO() #observe the string order, have to claim it's even(trivial) or odd(SPT)
 end
 
 function main()
@@ -174,13 +180,14 @@ function main()
     tD    = args["tD"]
     J     = args["J"]
     initD = args["initD"]
+    Dstep = args["Dstep"]
     U     = args["U"]
-    mps_path = generate_mps_path(N, t1, t2, tR, tD, J, U, D)
+    mps_path = generate_mps_path(N, t1, t2, tR, tD, J, U, D, Dstep)
     sites = create_sites(N)
     os    = system_ham(N, t1, t2, tR, tD, J, U)
     HS    = MPO(os, sites)
     psi0  = create_psi0(N, load, mps_path)
 
-    dmrg_GS(psi0, HS, mps_path)
+    dmrg_GS(psi0, HS, mps_path, initD, Dstep, Dmax)
 end
 main()
