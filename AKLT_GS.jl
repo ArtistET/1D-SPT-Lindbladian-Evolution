@@ -26,7 +26,11 @@ function parse_commandline()
             help = "Half of the system size, which is the size of one branch of the ladder, N is recommanded to be even"
             arg_type = Int
         "-D"
-            help = "The bond dimension"
+            help = "The maximum bond dimension"
+            default = 100
+            arg_type = Int
+        "--Dstep"
+            help = "The step of increasing maxdim in DMRG"
             default = 100
             arg_type = Int
         "--t1"
@@ -62,12 +66,26 @@ function parse_commandline()
     return parse_args(s)
 end
 
-function generate_mps_path(psi0, N, t1, t2, tR, tD, J, U, D)
-    if !isdir("./psi/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_U$(U)/Dmax$(D)")
-         mkpath("./psi/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_U$(U)/Dmax$(D)")
+function generate_mps_path( N, t1, t2, tR, tD, J, U, D)
+    if !isdir("./psi/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(D)")
+         mkpath("./psi/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(D)")
     end
-    mps_path="./psi/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_U$(U)/Dmax$(D)/AKLT_NN$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_U$(U)_Dmax$(D).h5"
+    mps_path="./psi/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(D)/AKLT_NN$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)_Dmax$(D).h5"
     return mps_path
+end
+
+function load_mps(mps_path)
+    println("load from init")
+    f = h5open(mps_path, "r")
+    psi0 = read(f, "psi0", MPS)
+    close(f)
+    return psi0
+end
+
+function save_checkpoint(psi0, mps_path)
+    f = h5open(mps_path,"w")
+    write(f,"psi0",psi0)
+    close(f)
 end
 
 function create_sites(N::Int64)
@@ -117,20 +135,30 @@ function system_ham(N::Int64, t1::Float64, t2::Float64, tR::Float64, tD::Float64
     return os
 end
 
-function dmrg_GS(N::Int64, t1::Float64, t2::Float64, tR::Float64, tD::Float64, J::Float64, U::Float64, H; eps=1e-10)
-    state1  = [isodd(n) ? "Up" : "Dn" for n=1:2*N] #按奇偶分up/down
-    state2  = [isodd(n) ? "Dn" : "Up" for n=1:2*N]
-    psi0    = productMPS(sites, state1) + productMPS(sites, state2)
+function create_psi0(N::Int, load::Bool, mps_path)
+    if load
+        psi0     = load_mps(mps_path)
+    else
+        state1   = [isodd(n) ? "Up" : "Dn" for n=1:2*N] #按奇偶分up/down
+        state2   = [isodd(n) ? "Dn" : "Up" for n=1:2*N]
+        psi0     = productMPS(sites, state1) + productMPS(sites, state2)
+    end
+    return psi0
+end
+
+function dmrg_GS(psi0, H, mps_path; eps=1e-10)
     nsweeps = 1
     Elast   = Inf
     noise   = [1e-6]
     cutoff  = [0]
     for n = 1:400
+        maxdim = initD *(n-1)
         energy, psi = dmrg(H, psi0; nsweeps, maxdim, cutoff, noise)
         if abs(Elast-energy) < eps
             break
         end
         Elast = energy
+        save_checkpoint(psi, mps_path)
     end
 end
 
@@ -147,8 +175,12 @@ function main()
     J     = args["J"]
     initD = args["initD"]
     U     = args["U"]
-    sites= create_sites(N)
-    os   = system_ham(N, t1, t2, tR, tD, J, U)
-    HS   = MPO(os, sites)
+    mps_path = generate_mps_path(N, t1, t2, tR, tD, J, U, D)
+    sites = create_sites(N)
+    os    = system_ham(N, t1, t2, tR, tD, J, U)
+    HS    = MPO(os, sites)
+    psi0  = create_psi0(N, load, mps_path)
+
+    dmrg_GS(psi0, HS, mps_path)
 end
 main()

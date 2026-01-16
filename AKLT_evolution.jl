@@ -76,8 +76,8 @@ function main()
     J     = args["J"]
     initD = args["initD"]
     U     = args["U"]
-    sites= create_sites(N)
-    os   = system_ham(N, t1, t2, tR, tD, J, U)
-    HS   = MPO(os, sites)
+    sites = create_sites(N)
+    os    = system_ham(N, t1, t2, tR, tD, J, U)
+    HS    = MPO(os, sites)
 end
 main()
