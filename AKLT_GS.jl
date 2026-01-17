@@ -67,10 +67,10 @@ function parse_commandline()
 end
 
 function generate_mps_path( N, t1, t2, tR, tD, J, U, Dmax, Dstep)
-    if !isdir("./groud_states/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(Dmax)/Dstep$(Dstep)")
-         mkpath("./groud_states/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(Dmax)/Dstep$(Dstep)")
+    if !isdir("./ground_states/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(Dmax)/Dstep$(Dstep)")
+         mkpath("./ground_states/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(Dmax)/Dstep$(Dstep)")
     end
-    mps_path="./groud_states/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(Dmax)/Dstep$(Dstep)/AKLT_NN$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)_Dmax$(Dmax).h5"
+    mps_path="./ground_states/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(Dmax)/Dstep$(Dstep)/AKLT_NN$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)_Dmax$(Dmax).h5"
     return mps_path
 end
 
