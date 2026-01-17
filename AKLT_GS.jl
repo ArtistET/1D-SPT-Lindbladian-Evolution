@@ -148,7 +148,7 @@ end
 
 function dmrg_GS(load, H, mps_path, initD, Dstep, Dmax; eps=1e-10)
     psi0  = create_psi0_for_dmrg(sites, N, load, mps_path)
-    normalize!(psi)
+    normalize!(psi0)
     nsweeps = 1
     Elast   = Inf
     noise   = [1e-6]
