@@ -1,4 +1,4 @@
-using ITensors
+using ITensors, ITensorMPS
 using LinearAlgebra
 using ITensors.HDF5
 using JLD
@@ -104,7 +104,7 @@ function system_ham(N::Int64, t1::Float64, t2::Float64, tR::Float64, tD::Float64
         for alpha = 1:2
             idx   = lpos(j,alpha)
             idx_a = lpos(j%N+1,alpha)        #next idx in the same ladder (a for same "alpha")
-            idx_d = (idx-3+2*alpha+N)%(2*N)  #next idx for tD (excepte for site(1,1))
+            idx_d = (idx-3+2*alpha+2*N)%(2*N)  #next idx for tD (excepte for site(1,1))  ###Check the idx_d & r 
             idx_r = idx+3-2*alpha            #next idx for tR
             #in-ladder terms
             os += -t[alpha], "Cdagup", idx, "Cup" ,idx_a
