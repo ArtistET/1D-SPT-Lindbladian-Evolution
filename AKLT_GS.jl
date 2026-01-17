@@ -25,7 +25,7 @@ function parse_commandline()
         "-N"
             help = "Half of the system size, which is the size of one branch of the ladder, N is recommanded to be even"
             arg_type = Int
-        "-D"
+        "--Dmax"
             help = "The maximum bond dimension"
             default = 100
             arg_type = Int
@@ -135,7 +135,7 @@ function system_ham(N::Int64, t1::Float64, t2::Float64, tR::Float64, tD::Float64
     return os
 end
 
-function create_psi0_for_dmrg(N::Int, load::Bool, mps_path)
+function create_psi0_for_dmrg(sites, N::Int, load::Bool, mps_path)
     if load
         psi0     = load_mps(mps_path)
     else
@@ -147,7 +147,7 @@ function create_psi0_for_dmrg(N::Int, load::Bool, mps_path)
 end
 
 function dmrg_GS(load, H, mps_path, initD, Dstep, Dmax; eps=1e-10)
-    psi0  = create_psi0_for_dmrg(N, load, mps_path)
+    psi0  = create_psi0_for_dmrg(sites, N, load, mps_path)
     nsweeps = 1
     Elast   = Inf
     noise   = [1e-6]
@@ -193,7 +193,7 @@ function create_SO(sites, i_st, i_end, N, odd_even::String) #observe the string 
         os_head += "Sz", 2*i_st
         os_head += "Sz", 2*i_st+1
         os_tail += "Sz", 2*i_end
-        os_tail += "Sz", (2*i_end+1)%(2*N)
+        os_tail += "Sz", (2*i_end)%(2*N)+1
         SO_head =  MPO(os_head, sites)
         SO_tail =  MPO(os_tail, sites)
         for j=i_st+1:i_end-1
@@ -208,8 +208,8 @@ end
 
 function measure(SO_head, SO_body, SO_tail, psi; cutoff=1e-10) # apply the operator to MPS to get the expectation
     psi_after = apply(SO_head, psi)
-    psi_after = apply(SO_body, psi)
-    psi_after = apply(SO_tail, psi, cutoff)
+    psi_after = apply(SO_body, psi_after)
+    psi_after = apply(SO_tail, psi_after, cutoff)
     SO_value = -inner(psi, psi_after)
     return SO_value
 end
@@ -219,7 +219,7 @@ function main()
     @show args
     load  = args["load"]
     N     = args["N"]
-    D     = args["D"]
+    Dmax  = args["Dmax"]
     t1    = args["t1"]
     t2    = args["t2"]
     tR    = args["tR"]

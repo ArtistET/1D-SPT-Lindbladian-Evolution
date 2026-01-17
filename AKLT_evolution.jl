@@ -27,7 +27,7 @@ function parse_commandline()
         "-N"
             help = "Half of the system size, which is the size of one branch of the ladder, N is recommanded to be even"
             arg_type = Int
-        "-D"
+        "--Dmax"
             help = "The maximum bond dimension"
             default = 100
             arg_type = Int
@@ -82,7 +82,7 @@ function main()
     @show args
     load  = args["load"]
     N     = args["N"]
-    D     = args["D"]
+    Dmax  = args["Dmax"]
     t1    = args["t1"]
     t2    = args["t2"]
     tR    = args["tR"]
