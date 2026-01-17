@@ -9,11 +9,11 @@ include("AKLT_GS.jl")
 
 # explanation for the model ------------can also see in FIG.1 of http://arxiv.org/abs/cond-mat/0609051v2  ---
 #        t1
-#      o---o---o---o
+#      o---o---o---o  alpha=1
 #      |  /|  /|  /|
 #   tR | / | / | / |   
 #      |/tD|/  |/  |
-#      o---o---o---o
+#      o---o---o---o  alpha=2
 #        t2
 #------------------------------------------------------------------------------------------------------------
 function parse_commandline()
