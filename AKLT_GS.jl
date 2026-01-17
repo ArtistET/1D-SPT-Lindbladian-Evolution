@@ -66,11 +66,11 @@ function parse_commandline()
     return parse_args(s)
 end
 
-function generate_mps_path( N, t1, t2, tR, tD, J, U, D, Dstep)
-    if !isdir("./groud_states/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(D)/Dstep$(Dstep)")
-         mkpath("./groud_states/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(D)/Dstep$(Dstep)")
+function generate_mps_path( N, t1, t2, tR, tD, J, U, Dmax, Dstep)
+    if !isdir("./groud_states/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(Dmax)/Dstep$(Dstep)")
+         mkpath("./groud_states/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(Dmax)/Dstep$(Dstep)")
     end
-    mps_path="./groud_states/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(D)/Dstep$(Dstep)/AKLT_NN$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)_Dmax$(D).h5"
+    mps_path="./groud_states/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(Dmax)/Dstep$(Dstep)/AKLT_NN$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)_Dmax$(Dmax).h5"
     return mps_path
 end
 
@@ -228,7 +228,7 @@ function main()
     initD = args["initD"]
     Dstep = args["Dstep"]
     U     = args["U"]
-    mps_path = generate_mps_path(N, t1, t2, tR, tD, J, U, D, Dstep)
+    mps_path = generate_mps_path(N, t1, t2, tR, tD, J, U, Dmax, Dstep)
     sites = create_sites(N)
     os    = system_ham(N, t1, t2, tR, tD, J, U)
     HS    = MPO(os, sites)

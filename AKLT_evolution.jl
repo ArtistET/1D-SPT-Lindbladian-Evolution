@@ -91,7 +91,7 @@ function main()
     initD = args["initD"]
     Dstep = args["Dstep"]
     U     = args["U"]
-    mps_path = generate_mps_path(N, t1, t2, tR, tD, J, U, D, Dstep)
+    mps_path = generate_mps_path(N, t1, t2, tR, tD, J, U, Dmax, Dstep)
     sites = create_sites(N)
     os    = system_ham(N, t1, t2, tR, tD, J, U)
     HS    = MPO(os, sites)
