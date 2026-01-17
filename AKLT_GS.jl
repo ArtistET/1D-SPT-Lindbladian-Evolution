@@ -67,10 +67,10 @@ function parse_commandline()
 end
 
 function generate_mps_path( N, t1, t2, tR, tD, J, U, D, Dstep)
-    if !isdir("./psi/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(D)/Dstep$(Dstep)")
-         mkpath("./psi/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(D)/Dstep$(Dstep)")
+    if !isdir("./groud_states/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(D)/Dstep$(Dstep)")
+         mkpath("./groud_states/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(D)/Dstep$(Dstep)")
     end
-    mps_path="./psi/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(D)/Dstep$(Dstep)/AKLT_NN$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)_Dmax$(D).h5"
+    mps_path="./groud_states/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(D)/Dstep$(Dstep)/AKLT_NN$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)_Dmax$(D).h5"
     return mps_path
 end
 
@@ -102,8 +102,8 @@ function system_ham(N::Int64, t1::Float64, t2::Float64, tR::Float64, tD::Float64
     os = OpSum()
     for j=1:N
         for alpha = 1:2
-            idx   = lpos(i,alpha)
-            idx_a = lpos(i%N+1,alpha)        #next idx in the same ladder
+            idx   = lpos(j,alpha)
+            idx_a = lpos(j%N+1,alpha)        #next idx in the same ladder (a for same "alpha")
             idx_d = (idx-3+2*alpha+N)%(2*N)  #next idx for tD (excepte for site(1,1))
             idx_r = idx+3-2*alpha            #next idx for tR
             #in-ladder terms
@@ -127,7 +127,7 @@ function system_ham(N::Int64, t1::Float64, t2::Float64, tR::Float64, tD::Float64
             os += U, "Nup", idx, "Ndn", idx
         end
             #spin coupling terms
-            idx = lpos(i,1)
+            idx = lpos(j,1)
             os += J/2,"S+",idx,"S-",idx+1
             os += J/2,"S-",idx,"S+",idx+1
             os += J,  "Sz",idx,"Sz",idx+1
@@ -135,7 +135,7 @@ function system_ham(N::Int64, t1::Float64, t2::Float64, tR::Float64, tD::Float64
     return os
 end
 
-function create_psi0(N::Int, load::Bool, mps_path)
+function create_psi0_for_dmrg(N::Int, load::Bool, mps_path)
     if load
         psi0     = load_mps(mps_path)
     else
@@ -146,7 +146,8 @@ function create_psi0(N::Int, load::Bool, mps_path)
     return psi0
 end
 
-function dmrg_GS(psi0, H, mps_path, initD, Dstep, Dmax; eps=1e-10)
+function dmrg_GS(load, H, mps_path, initD, Dstep, Dmax; eps=1e-10)
+    psi0  = create_psi0_for_dmrg(N, load, mps_path)
     nsweeps = 1
     Elast   = Inf
     noise   = [1e-6]
@@ -160,12 +161,57 @@ function dmrg_GS(psi0, H, mps_path, initD, Dstep, Dmax; eps=1e-10)
         Elast = energy
         save_checkpoint(psi, mps_path)
     end
+    normalize!(psi)
+    save_checkpoint(psi, mps_path)
+    return energy, psi
 end
 
-function rotation_Z2() # to generate the Z2 rotation which needed in stirng order
+function rotation_Z2(sites, idx) # to generate the Z2 rotation which needed in stirng order
+    Sz = op("Sz", sites, idx)
+    Rz = exp(1im * pi * Sz)
+    return Rz
 end
 
-function SO() #observe the string order, have to claim it's even(trivial) or odd(SPT)
+function create_SO(sites, i_st, i_end, N, odd_even::String) #observe the string order, have to claim it's even(trivial) or odd(SPT),1<=i_st<i_end<=N and keep i_end>=i_st+2, so that N>=3 is recommended
+    os_head = OpSum()
+    SO_body = ITensor[]
+    os_tail = OpSum()
+    if odd_even == "odd" #odd string for SPT 
+        os_head += "Sz", 2*i_st-1
+        os_head += "Sz", 2*i_st
+        os_tail += "Sz", 2*i_end-1
+        os_tail += "Sz", 2*i_end
+        SO_head =  MPO(os_head, sites)
+        SO_tail =  MPO(os_tail, sites)
+        for j=i_st+1:i_end-1
+            for alpha=1:2
+                Rz = rotation_Z2(sites, lpos(j, alpha))
+                push!(SO_body, Rz)
+            end
+        end
+    else               #even string for trivial 
+        os_head += "Sz", 2*i_st
+        os_head += "Sz", 2*i_st+1
+        os_tail += "Sz", 2*i_end
+        os_tail += "Sz", (2*i_end+1)%(2*N)
+        SO_head =  MPO(os_head, sites)
+        SO_tail =  MPO(os_tail, sites)
+        for j=i_st+1:i_end-1
+            for alpha=1:2
+                Rz = rotation_Z2(sites, lpos(j-alpha+2, alpha))
+                push!(SO_body, Rz)
+            end
+        end
+    end
+    return SO_head, SO_body, SO_tail
+end
+
+function measure(SO_head, SO_body, SO_tail, psi; cutoff=1e-10) # apply the operator to MPS to get the expectation
+    psi_after = apply(SO_head, psi)
+    psi_after = apply(SO_body, psi)
+    psi_after = apply(SO_tail, psi, cutoff)
+    SO_value = -inner(psi, psi_after)
+    return SO_value
 end
 
 function main()
@@ -186,8 +232,20 @@ function main()
     sites = create_sites(N)
     os    = system_ham(N, t1, t2, tR, tD, J, U)
     HS    = MPO(os, sites)
-    psi0  = create_psi0(N, load, mps_path)
 
-    dmrg_GS(psi0, HS, mps_path, initD, Dstep, Dmax)
+    SO_h_odd, SO_b_odd, SO_t_odd    = create_SO(sites, 1, N, N, "odd")
+    SO_h_even, SO_b_even, SO_t_even = create_SO(sites, 1, N, N, "even")
+
+    energy,psi = dmrg_GS(load, HS, mps_path, initD, Dstep, Dmax)
+    SOV_odd    = measure(SO_h_odd, SO_b_odd, SO_t_odd, psi)
+    SOV_even   = measure(SO_h_even, SO_b_even, SO_t_even, psi)
+    println("E= ", energy, "SO_odd= ", SOV_odd, "SO_even= ", SOV_even)
+    if SOV_odd>SOV_even
+        println("This phase is SPT")
+    elseif SOV_odd==SOV_even
+        println("Now at the critical point")
+    else
+        println("This phase is trivial")
+    end
 end
 main()
