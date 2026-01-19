@@ -59,7 +59,7 @@ function parse_commandline()
             arg_type = Int
         "--Dload"
             help = "The maximum bond dimension loaded"
-            default = 10
+            default = 100
             arg_type = Int
         "-U"
             help = "The repulsive interaction relative to t"
