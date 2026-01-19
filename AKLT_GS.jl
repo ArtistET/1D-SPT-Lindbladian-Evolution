@@ -214,8 +214,9 @@ function measure(SO_head, SO_body, SO_tail, psi; cutoff=1e-10) # apply the opera
         psi_after = apply(single_Rz, psi_after)
     end
     psi_after = apply(SO_tail, psi_after; cutoff=cutoff)
-    SO_value = -inner(psi, psi_after)
-    return SO_value
+    C_value = -inner(psi, psi_after)
+    SO_value = real(C_value)
+    return C_value, SO_value
 end
 
 function main()
@@ -242,10 +243,12 @@ function main()
 
     energy,psi = dmrg_GS(load, sites, N, HS, mps_path, initD, Dstep, Dmax)
 
-    SOV_odd    = measure(SO_h_odd, SO_b_odd, SO_t_odd, psi)
-    SOV_even   = measure(SO_h_even, SO_b_even, SO_t_even, psi)
-    println("E= ", energy, "SO_odd= ", SOV_odd, "SO_even= ", SOV_even)
-    if SOV_odd>SOV_even
+    C_odd, SOV_odd     = measure(SO_h_odd, SO_b_odd, SO_t_odd, psi)
+    C_even, SOV_even   = measure(SO_h_even, SO_b_even, SO_t_even, psi)
+    println("E= ", energy)
+    println("complex SO_odd= ", C_odd, "SO_odd= ", SOV_odd, "SO_even= ", SOV_even)
+    println("complex SO_even= ", C_even, "SO_even= ", SOV_even)
+    if SOV_odd > SOV_even
         println("This phase is SPT")
     elseif SOV_odd==SOV_even
         println("Now maybe at the critical point")
