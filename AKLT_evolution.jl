@@ -1,7 +1,6 @@
 using ITensors, ITensorMPS
 using LinearAlgebra
-using ITensors.HDF5
-using JLD
+using JLD2
 using ArgParse
 import Base.Filesystem.mkpath
 
@@ -52,6 +51,7 @@ function parse_commandline()
             arg_type = Float64
         "-J"
             help = "The coupling J"
+            default = 0
             arg_type = Float64
         "--initD"
             help = "The initial bond dimension"
@@ -60,9 +60,9 @@ function parse_commandline()
         "-U"
             help = "The repulsive interaction relative to t"
             arg_type = Float64
-        "-f"
-            help = "The filling of electron"
-            arg_type = Float64
+        # "-f"
+        #     help = "The filling of electron"
+        #     arg_type = Float64
     end
 
     return parse_args(s)

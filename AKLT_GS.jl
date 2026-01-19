@@ -1,7 +1,6 @@
 using ITensors, ITensorMPS
 using LinearAlgebra
-using ITensors.HDF5
-using JLD
+using JLD2
 using ArgParse
 import Base.Filesystem.mkpath
 
@@ -50,6 +49,7 @@ function parse_commandline()
             arg_type = Float64
         "-J"
             help = "The coupling J"
+            default = 0
             arg_type = Float64
         "--initD"
             help = "The initial bond dimension"
@@ -58,9 +58,9 @@ function parse_commandline()
         "-U"
             help = "The repulsive interaction relative to t"
             arg_type = Float64
-        "-f"
-            help = "The filling of electron"
-            arg_type = Float64
+        # "-f"
+        #     help = "The filling of electron"
+        #     arg_type = Float64
     end
 
     return parse_args(s)
@@ -70,22 +70,18 @@ function generate_mps_path( N, t1, t2, tR, tD, J, U, Dmax, Dstep)
     if !isdir("./ground_states/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(Dmax)/Dstep$(Dstep)")
          mkpath("./ground_states/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(Dmax)/Dstep$(Dstep)")
     end
-    mps_path="./ground_states/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(Dmax)/Dstep$(Dstep)/AKLT_NN$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)_Dmax$(Dmax).h5"
+    mps_path="./ground_states/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(Dmax)/Dstep$(Dstep)/AKLT_NN$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)_Dmax$(Dmax).jld2"
     return mps_path
 end
 
 function load_mps(mps_path)
     println("load from init")
-    f = h5open(mps_path, "r")
-    psi0 = read(f, "psi0", MPS)
-    close(f)
+    @load mps_path psi0
     return psi0
 end
 
 function save_checkpoint(psi0, mps_path)
-    f = h5open(mps_path,"w")
-    write(f,"psi0",psi0)
-    close(f)
+    @save mps_path psi0
 end
 
 function create_sites(N::Int64)
@@ -104,7 +100,7 @@ function system_ham(N::Int64, t1::Float64, t2::Float64, tR::Float64, tD::Float64
         for alpha = 1:2
             idx   = lpos(j,alpha)
             idx_a = lpos(j%N+1,alpha)        #next idx in the same ladder (a for same "alpha")
-            idx_d = (idx-3+2*alpha+2*N)%(2*N)  #next idx for tD (excepte for site(1,1))  ###Check the idx_d & r 
+            idx_d = (idx-3+2*alpha)%(2*N)    #next idx for tD (excepte for site(1,1)) 
             idx_r = idx+3-2*alpha            #next idx for tR
             #in-ladder terms
             os += -t[alpha], "Cdagup", idx, "Cup" ,idx_a
@@ -117,8 +113,8 @@ function system_ham(N::Int64, t1::Float64, t2::Float64, tR::Float64, tD::Float64
             os += -tR, "Cdagup", idx, "Cup", idx_r
             os += -tR, "Cdagdn", idx, "Cdn", idx_r
             if idx ==1
-                os += -tD, "Cdagup", idx, "Cup", 2*N
-                os += -tD, "Cdagdn", idx, "Cdn", 2*N
+                os += -tD, "Cdagup", 1, "Cup", 2*N
+                os += -tD, "Cdagdn", 1, "Cdn", 2*N
             else
                 os += -tD, "Cdagup", idx, "Cup", idx_d
                 os += -tD, "Cdagdn", idx, "Cdn", idx_d
@@ -146,9 +142,10 @@ function create_psi0_for_dmrg(sites, N::Int, load::Bool, mps_path)
     return psi0
 end
 
-function dmrg_GS(load, H, mps_path, initD, Dstep, Dmax; eps=1e-10)
+function dmrg_GS(load, sites, N, H, mps_path, initD, Dstep, Dmax; eps=1e-10)
     psi0  = create_psi0_for_dmrg(sites, N, load, mps_path)
     normalize!(psi0)
+    orthogonalize!(psi0, 1)
     nsweeps = 1
     Elast   = Inf
     noise   = [1e-6]
@@ -163,6 +160,7 @@ function dmrg_GS(load, H, mps_path, initD, Dstep, Dmax; eps=1e-10)
         save_checkpoint(psi, mps_path)
     end
     normalize!(psi)
+    orthogonalize!(psi, 1)
     save_checkpoint(psi, mps_path)
     return energy, psi
 end
@@ -209,7 +207,9 @@ end
 
 function measure(SO_head, SO_body, SO_tail, psi; cutoff=1e-10) # apply the operator to MPS to get the expectation
     psi_after = apply(SO_head, psi)
-    psi_after = apply(SO_body, psi_after)
+    for single_Rz in SO_body
+        psi_after = apply(single_Rz, psi_after)
+    end
     psi_after = apply(SO_tail, psi_after, cutoff)
     SO_value = -inner(psi, psi_after)
     return SO_value
@@ -237,14 +237,14 @@ function main()
     SO_h_odd, SO_b_odd, SO_t_odd    = create_SO(sites, 1, N, N, "odd")
     SO_h_even, SO_b_even, SO_t_even = create_SO(sites, 1, N, N, "even")
 
-    energy,psi = dmrg_GS(load, HS, mps_path, initD, Dstep, Dmax)
+    energy,psi = dmrg_GS(load, sites, N, HS, mps_path, initD, Dstep, Dmax)
     SOV_odd    = measure(SO_h_odd, SO_b_odd, SO_t_odd, psi)
     SOV_even   = measure(SO_h_even, SO_b_even, SO_t_even, psi)
     println("E= ", energy, "SO_odd= ", SOV_odd, "SO_even= ", SOV_even)
     if SOV_odd>SOV_even
         println("This phase is SPT")
     elseif SOV_odd==SOV_even
-        println("Now at the critical point")
+        println("Now maybe at the critical point")
     else
         println("This phase is trivial")
     end
