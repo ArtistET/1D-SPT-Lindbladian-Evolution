@@ -146,17 +146,20 @@ function dmrg_GS(load, sites, N, H, mps_path, initD, Dstep, Dmax; eps=1e-10)
     psi0  = create_psi0_for_dmrg(sites, N, load, mps_path)
     normalize!(psi0)
     orthogonalize!(psi0, 1)
+    psi = psi0
     nsweeps = 1
-    Elast   = Inf
+    energy   = Inf
     noise   = [1e-6]
     cutoff  = [0]
     for n = 1:400
         maxdim = min(initD+Dstep*(n-1) , Dmax)
-        energy, psi = dmrg(H, psi0; nsweeps, maxdim, cutoff, noise)
-        if abs(Elast-energy) < eps
+        E_now, psi = dmrg(H, psi; nsweeps, maxdim, cutoff, noise)
+        E_diff      = abs(E_now-energy)
+        println("Now step No.", n, " , now energy difference ", E_diff)
+        if E_diff < eps
             break
         end
-        Elast = energy
+        energy = E_now
         save_checkpoint(psi, mps_path)
     end
     normalize!(psi)
@@ -210,7 +213,7 @@ function measure(SO_head, SO_body, SO_tail, psi; cutoff=1e-10) # apply the opera
     for single_Rz in SO_body
         psi_after = apply(single_Rz, psi_after)
     end
-    psi_after = apply(SO_tail, psi_after, cutoff)
+    psi_after = apply(SO_tail, psi_after; cutoff=cutoff)
     SO_value = -inner(psi, psi_after)
     return SO_value
 end
@@ -238,6 +241,7 @@ function main()
     SO_h_even, SO_b_even, SO_t_even = create_SO(sites, 1, N, N, "even")
 
     energy,psi = dmrg_GS(load, sites, N, HS, mps_path, initD, Dstep, Dmax)
+
     SOV_odd    = measure(SO_h_odd, SO_b_odd, SO_t_odd, psi)
     SOV_even   = measure(SO_h_even, SO_b_even, SO_t_even, psi)
     println("E= ", energy, "SO_odd= ", SOV_odd, "SO_even= ", SOV_even)
