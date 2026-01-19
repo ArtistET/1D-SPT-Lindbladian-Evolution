@@ -61,6 +61,10 @@ function parse_commandline()
             help = "The maximum bond dimension loaded"
             default = 100
             arg_type = Int
+        "--Dstepload"
+            help = "The Dstep loaded"
+            default = 20
+            arg_type = Int
         "-U"
             help = "The repulsive interaction relative to t"
             arg_type = Float64
@@ -72,11 +76,11 @@ function parse_commandline()
     return parse_args(s)
 end
 
-function create_psi0_for_evolution(N::Int, load::Bool, HS, mps_path)
+function create_psi0_for_evolution(N::Int, load::Bool, HS, mps_path, load_path)
     if load
-        psi0         = load_mps(mps_path)
+        psi0         = load_mps(load_path)
     else
-        energy, psi0 = dmrg_GS(false, HS, mps_path, initD, Dstep, Dmax)
+        energy, psi0 = dmrg_GS(false, HS, mps_path, load_path, initD, Dstep, Dmax)
     end
     return psi0
 end
@@ -95,11 +99,13 @@ function main()
     initD = args["initD"]
     Dstep = args["Dstep"]
     Dload = args["Dload"]
+    Dstepload = args["Dstepload"]
     U     = args["U"]
-    mps_path = generate_mps_path(N, t1, t2, tR, tD, J, U, Dmax, Dstep)
+    mps_path  = generate_mps_path(N, t1, t2, tR, tD, J, U, Dmax, Dstep)
+    load_path = generate_mps_path(N, t1, t2, tR, tD, J, U, Dload, Dstepload)
     sites = create_sites(N)
     os    = system_ham(N, t1, t2, tR, tD, J, U)
     HS    = MPO(os, sites)
-    psi0  = create_psi0_for_evolution(N, load, HS, mps_path)
+    psi0  = create_psi0_for_evolution(N, load, HS, mps_path, load_path)
 end
 main()

@@ -59,6 +59,10 @@ function parse_commandline()
             help = "The maximum bond dimension loaded"
             default = 100
             arg_type = Int
+        "--Dstepload"
+            help = "The Dstep loaded"
+            default = 20
+            arg_type = Int
         "-U"
             help = "The repulsive interaction relative to t"
             arg_type = Float64
@@ -78,9 +82,9 @@ function generate_mps_path( N, t1, t2, tR, tD, J, U, Dmax, Dstep)
     return mps_path
 end
 
-function load_mps(mps_path)
+function load_mps(load_path)
     println("load from init")
-    @load mps_path psi0
+    @load load_path psi0
     return psi0
 end
 
@@ -135,9 +139,9 @@ function system_ham(N::Int64, t1::Float64, t2::Float64, tR::Float64, tD::Float64
     return os
 end
 
-function create_psi0_for_dmrg(sites, N::Int, load::Bool, mps_path)
+function create_psi0_for_dmrg(sites, N::Int, load::Bool, load_path)
     if load
-        psi0     = load_mps(mps_path)
+        psi0     = load_mps(load_path)
     else
         state1   = [isodd(n) ? "Up" : "Dn" for n=1:2*N] #按奇偶分up/down
         state2   = [isodd(n) ? "Dn" : "Up" for n=1:2*N]
@@ -146,8 +150,8 @@ function create_psi0_for_dmrg(sites, N::Int, load::Bool, mps_path)
     return psi0
 end
 
-function dmrg_GS(load, sites, N, H, mps_path, initD, Dstep, Dmax; eps=1e-10)
-    psi0  = create_psi0_for_dmrg(sites, N, load, mps_path)
+function dmrg_GS(load, sites, N, H, mps_path, load_path, initD, Dstep, Dmax; eps=1e-10)
+    psi0  = create_psi0_for_dmrg(sites, N, load, load_path)
     normalize!(psi0)
     orthogonalize!(psi0, 1)
     psi = psi0
@@ -237,8 +241,10 @@ function main()
     initD = args["initD"]
     Dstep = args["Dstep"]
     Dload = args["Dload"]
+    Dstepload = args["Dstepload"]
     U     = args["U"]
-    mps_path = generate_mps_path(N, t1, t2, tR, tD, J, U, Dmax, Dstep)
+    mps_path  = generate_mps_path(N, t1, t2, tR, tD, J, U, Dmax, Dstep)
+    load_path = generate_mps_path(N, t1, t2, tR, tD, J, U, Dload, Dstepload)
     sites = create_sites(N)
     os    = system_ham(N, t1, t2, tR, tD, J, U)
     HS    = MPO(os, sites)
@@ -246,7 +252,7 @@ function main()
     SO_h_odd, SO_b_odd, SO_t_odd    = create_SO(sites, 1, N, N, "odd")
     SO_h_even, SO_b_even, SO_t_even = create_SO(sites, 1, N, N, "even")
 
-    energy,psi = dmrg_GS(load, sites, N, HS, mps_path, initD, Dstep, Dmax)
+    energy,psi = dmrg_GS(load, sites, N, HS, mps_path, load_path, initD, Dstep, Dmax)
 
     C_odd, SOV_odd     = measure(SO_h_odd, SO_b_odd, SO_t_odd, psi)
     C_even, SOV_even   = measure(SO_h_even, SO_b_even, SO_t_even, psi)
