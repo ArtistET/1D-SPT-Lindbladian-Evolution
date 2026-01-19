@@ -57,6 +57,10 @@ function parse_commandline()
             help = "The initial bond dimension"
             default = 10
             arg_type = Int
+        "--Dload"
+            help = "The maximum bond dimension loaded"
+            default = 10
+            arg_type = Int
         "-U"
             help = "The repulsive interaction relative to t"
             arg_type = Float64
@@ -90,6 +94,7 @@ function main()
     J     = args["J"]
     initD = args["initD"]
     Dstep = args["Dstep"]
+    Dload = args["Dload"]
     U     = args["U"]
     mps_path = generate_mps_path(N, t1, t2, tR, tD, J, U, Dmax, Dstep)
     sites = create_sites(N)
