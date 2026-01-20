@@ -139,23 +139,24 @@ function system_ham(N::Int64, t1::Float64, t2::Float64, tR::Float64, tD::Float64
     return os
 end
 
-function create_psi0_for_dmrg(sites, N::Int, load::Bool, load_path)
+function create_psi0_for_dmrg(N::Int, load::Bool, load_path)
     if load
         println("Load from ground_states")
         psi0     = load_mps(load_path)
+        sites    = siteinds(psi0)
     else
+        sites    = create_sites(N)
         state1   = [isodd(n) ? "Up" : "Dn" for n=1:2*N] #按奇偶分up/down
         state2   = [isodd(n) ? "Dn" : "Up" for n=1:2*N]
         psi0     = productMPS(sites, state1) + productMPS(sites, state2)
     end
-    return psi0
+    return sites, psi0
 end
 
-function dmrg_GS(load, sites, N, H, mps_path, load_path, initD, Dstep, Dmax; eps=1e-10)
-    psi0  = create_psi0_for_dmrg(sites, N, load, load_path)
-    normalize!(psi0)
-    orthogonalize!(psi0, 1)
+function dmrg_GS(load, N, H, mps_path, psi0, initD, Dstep, Dmax; eps=1e-10)
     psi = psi0
+    normalize!(psi)
+    orthogonalize!(psi, 1)
     nsweeps = 1
     energy   = Inf
     noise   = [1e-6]
@@ -247,14 +248,14 @@ function main()
     U     = args["U"]
     mps_path  = generate_mps_path(N, t1, t2, tR, tD, J, U, Dmax, Dstep)
     load_path = generate_mps_path(N, t1, t2, tR, tD, J, U, Dload, Dstepload)
-    sites = create_sites(N)
+    sites, psi0 = create_psi0_for_dmrg(N, load, load_path)
     os    = system_ham(N, t1, t2, tR, tD, J, U)
     HS    = MPO(os, sites)
 
     SO_h_odd, SO_b_odd, SO_t_odd    = create_SO(sites, 1, N, N, "odd")
     SO_h_even, SO_b_even, SO_t_even = create_SO(sites, 1, N, N, "even")
 
-    energy,psi = dmrg_GS(load, sites, N, HS, mps_path, load_path, initD, Dstep, Dmax)
+    energy,psi = dmrg_GS(load, N, HS, mps_path, psi0, initD, Dstep, Dmax)
 
     C_odd, SOV_odd     = measure(SO_h_odd, SO_b_odd, SO_t_odd, psi)
     C_even, SOV_even   = measure(SO_h_even, SO_b_even, SO_t_even, psi)
