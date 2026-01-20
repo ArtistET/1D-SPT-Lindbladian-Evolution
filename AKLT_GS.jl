@@ -141,6 +141,7 @@ end
 
 function create_psi0_for_dmrg(sites, N::Int, load::Bool, load_path)
     if load
+        println("Load from ground_states")
         psi0     = load_mps(load_path)
     else
         state1   = [isodd(n) ? "Up" : "Dn" for n=1:2*N] #按奇偶分up/down
