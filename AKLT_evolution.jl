@@ -75,6 +75,12 @@ function parse_commandline()
         "-U"
             help = "The repulsive interaction relative to t"
             arg_type = Float64
+        "--dt"
+            help = "The step of time"
+            arg_type = Float64
+        "--tsmax"
+            help = "The maximum step number of t"
+            arg_type = Int
         # "-f"
         #     help = "The filling of electron"
         #     arg_type = Float64
@@ -87,6 +93,14 @@ function load_slice(slice_path, t)
     println("Load from time slice where t= ", t)
     @load slice_path psi0
     return psi0
+end
+
+function generate_slice_path(t, N, t1, t2, tR, tD, J, U, Dmax, Dstep)
+    if !isdir("./psi_evolution/T$(t)_N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(Dmax)/Dstep$(Dstep)")
+         mkpath("./psi_evolution/T$(t)_N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(Dmax)/Dstep$(Dstep)")
+    end
+    mps_path="./psi_evolution/T$(t)_N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(Dmax)/Dstep$(Dstep)/AKLT_T$(t)__N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)_Dmax$(Dmax).jld2"
+    return mps_path
 end
 
 function create_psi0_for_evolution(N::Int, load::Bool, loadsl, loadt, HS, mps_path, slice_path, psi0)
@@ -117,12 +131,15 @@ function main()
     Dload = args["Dload"]
     Dstepload = args["Dstepload"]
     U     = args["U"]
-    mps_path  = generate_mps_path(N, t1, t2, tR, tD, J, U, Dmax, Dstep)
+    dt    = args["dt"]
+    tsmax = args["tsmax"]
     load_path = generate_mps_path(N, t1, t2, tR, tD, J, U, Dload, Dstepload)
+    slice_path= generate_slice_path(t, N, t1, t2, tR, tD, J, U, Dmax, Dstep)
+    slice_load_path= generate_slice_path(t, N, t1, t2, tR, tD, J, U, Dload, Dstepload)
     slice_path
     sites, psi0  = create_psi0_for_dmrg(N, load, load_path)
-    psi0  = create_psi0_for_evolution(N, load, loadsl, loadt, HS, mps_path, slice_path, psi0)
     os    = system_ham(N, t1, t2, tR, tD, J, U)
     HS    = MPO(os, sites)
+    psi0  = create_psi0_for_evolution(N, load, loadsl, loadt, HS, mps_path, slice_load_path, psi0)
 end
 main()
