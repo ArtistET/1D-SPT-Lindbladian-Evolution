@@ -21,8 +21,15 @@ function parse_commandline()
     @add_arg_table s begin
         "--load"
             help = "load init ground state or not"
+            default = true
+            arg_type = Bool
+        "--loadsl"
+            help = "load a evolution slice or not"
             default = false
             arg_type = Bool
+        "--loadt"
+            help = "the t of the slice loaded"
+            arg_type = Float64
         "-N"
             help = "Half of the system size, which is the size of one branch of the ladder, N is recommanded to be even"
             arg_type = Int
@@ -76,19 +83,28 @@ function parse_commandline()
     return parse_args(s)
 end
 
-function create_psi0_for_evolution(N::Int, load::Bool, HS, mps_path, load_path)
-    if load
-        psi0         = load_mps(load_path)
-    else
-        energy, psi0 = dmrg_GS(false, HS, mps_path, load_path, initD, Dstep, Dmax)
-    end
+function load_slice(slice_path, t)
+    println("Load from time slice where t= ", t)
+    @load slice_path psi0
     return psi0
+end
+
+function create_psi0_for_evolution(N::Int, load::Bool, loadsl, loadt, HS, mps_path, slice_path, psi0)
+    if load
+        if loadsl
+            psi     = load_slice(slice_path, loadt)
+    else
+        energy, psi = dmrg_GS(false, N, HS, mps_path, psi0, initD, Dstep, Dmax)
+    end
+    return psi
 end
 
 function main()
     args = parse_commandline()
     @show args
     load  = args["load"]
+    loadsl= args["loadsl"]
+    loadt = args["loadt"]
     N     = args["N"]
     Dmax  = args["Dmax"]
     t1    = args["t1"]
@@ -103,9 +119,10 @@ function main()
     U     = args["U"]
     mps_path  = generate_mps_path(N, t1, t2, tR, tD, J, U, Dmax, Dstep)
     load_path = generate_mps_path(N, t1, t2, tR, tD, J, U, Dload, Dstepload)
-    sites = create_sites(N)
+    slice_path
+    sites, psi0  = create_psi0_for_dmrg(N, load, load_path)
+    psi0  = create_psi0_for_evolution(N, load, loadsl, loadt, HS, mps_path, slice_path, psi0)
     os    = system_ham(N, t1, t2, tR, tD, J, U)
     HS    = MPO(os, sites)
-    psi0  = create_psi0_for_evolution(N, load, HS, mps_path, load_path)
 end
 main()

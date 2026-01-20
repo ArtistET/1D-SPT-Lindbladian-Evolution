@@ -83,7 +83,7 @@ function generate_mps_path( N, t1, t2, tR, tD, J, U, Dmax, Dstep)
 end
 
 function load_mps(load_path)
-    println("load from init")
+    println("Load from ground_states")
     @load load_path psi0
     return psi0
 end
@@ -141,7 +141,6 @@ end
 
 function create_psi0_for_dmrg(N::Int, load::Bool, load_path)
     if load
-        println("Load from ground_states")
         psi0     = load_mps(load_path)
         sites    = siteinds(psi0)
     else
