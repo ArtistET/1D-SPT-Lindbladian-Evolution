@@ -162,9 +162,10 @@ function dmrg_GS(load, sites, N, H, mps_path, load_path, initD, Dstep, Dmax; eps
     for n = 1:400
         maxdim = min(initD+Dstep*(n-1) , Dmax)
         E_now, psi = dmrg(H, psi; nsweeps, maxdim, cutoff, noise)
-        E_diff      = abs(E_now-energy)
+        E_diff     = abs(E_now-energy)
+        EPS        = min(max(eps, E_now*eps/N),0.5)  #Care for the eps setting and adjust it immediatelt when things goes wrong.
         println("Now step No.", n, " , now energy difference ", E_diff)
-        if E_diff < eps
+        if E_diff < EPS && maxdim==Dmax
             break
         end
         energy = E_now
@@ -257,6 +258,7 @@ function main()
     C_odd, SOV_odd     = measure(SO_h_odd, SO_b_odd, SO_t_odd, psi)
     C_even, SOV_even   = measure(SO_h_even, SO_b_even, SO_t_even, psi)
     println("E= ", energy)
+    println("Dmid= ", dim(linkind(psi, N))) #Get the linkdim of the middle of psi (N~N+1), which is also the maximum bond dimension in a finite MPS.
     println("complex SO_odd= ", C_odd, "  SO_odd= ", SOV_odd)
     println("complex SO_even= ", C_even, "  SO_even= ", SOV_even)
     if SOV_odd > SOV_even
