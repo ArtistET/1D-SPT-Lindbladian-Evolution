@@ -114,7 +114,7 @@ function create_rho0_for_evolution(N::Int, load::Bool, loadsl, loadt, HS, mps_pa
             rho0    = outer(psi0, psi0';maxdim=Dmax, cutoff=1e-6)
         end
     else
-        energy, psi = dmrg_GS(false, N, HS, mps_path, psi0, initD, Dstep, Dmax)
+        energy, psi = dmrg_GS(N, HS, mps_path, psi0, initD, Dstep, Dmax)
         rho0        = outer(psi, psi';maxdim=Dmax, cutoff=1e-6)
     end
     return rho0

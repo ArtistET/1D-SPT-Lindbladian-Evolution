@@ -152,10 +152,10 @@ function create_psi0_for_dmrg(N::Int, load::Bool, load_path)
     return sites, psi0
 end
 
-function dmrg_GS(load, N, H, mps_path, psi0, initD, Dstep, Dmax; eps=1e-10)
+function dmrg_GS( N, H, mps_path, psi0, initD, Dstep, Dmax; eps=1e-10)
     psi = psi0
     normalize!(psi)
-    orthogonalize!(psi, 1)
+    orthogonalize!(psi, N)
     nsweeps = 1
     energy   = Inf
     noise   = [1e-6]
@@ -173,7 +173,7 @@ function dmrg_GS(load, N, H, mps_path, psi0, initD, Dstep, Dmax; eps=1e-10)
         save_checkpoint(psi, mps_path)
     end
     normalize!(psi)
-    orthogonalize!(psi, 1)
+    orthogonalize!(psi, N)
     save_checkpoint(psi, mps_path)
     return energy, psi
 end
@@ -229,6 +229,25 @@ function measure(SO_head, SO_body, SO_tail, psi; cutoff=1e-10) # apply the opera
     return C_value, SO_value
 end
 
+function check_entanglement(psi, N; default_ee=1e-6)
+    orthogonalize!(psi, N)
+    _,S,_ = svd(psi[N], (linkind(psi, N-1), siteind(psi,N)))
+    Sdim  = dim(S, 1)
+    n_less= 0
+    for n=1:Sdim
+        if S[n,n]<default_ee
+            n_less = n
+            println("The ", n, " th sigular value is small enough, which means less than ", default_ee)
+            println(S[n,n],S[n+1,n+1])
+            break
+        end
+    end
+    if n_less == 0
+        println("Every singular value is important, which means all larger than ", default_ee)
+    end
+    println("Minimum sigular value is ", S[Sdim,Sdim])
+end
+
 function main()
     args = parse_commandline()
     @show args
@@ -254,7 +273,7 @@ function main()
     SO_h_odd, SO_b_odd, SO_t_odd    = create_SO(sites, 1, N, N, "odd")
     SO_h_even, SO_b_even, SO_t_even = create_SO(sites, 1, N, N, "even")
 
-    energy,psi = dmrg_GS(load, N, HS, mps_path, psi0, initD, Dstep, Dmax)
+    energy,psi = dmrg_GS(N, HS, mps_path, psi0, initD, Dstep, Dmax)
 
     C_odd, SOV_odd     = measure(SO_h_odd, SO_b_odd, SO_t_odd, psi)
     C_even, SOV_even   = measure(SO_h_even, SO_b_even, SO_t_even, psi)
@@ -269,6 +288,7 @@ function main()
     else
         println("This phase is trivial")
     end
+    check_entanglement(psi, N)
 end
 
 
