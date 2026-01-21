@@ -29,6 +29,7 @@ function parse_commandline()
             arg_type = Bool
         "--loadt"
             help = "the t of the slice loaded"
+            default = 0.0
             arg_type = Float64
         "-N"
             help = "Half of the system size, which is the size of one branch of the ladder, N is recommanded to be even"
@@ -77,9 +78,11 @@ function parse_commandline()
             arg_type = Float64
         "--dt"
             help = "The step of time"
+            default  = 0.01
             arg_type = Float64
         "--tsmax"
             help = "The maximum step number of t"
+            default  = 20
             arg_type = Int
         # "-f"
         #     help = "The filling of electron"
@@ -91,8 +94,8 @@ end
 
 function load_slice(slice_path, t)
     println("Load from time slice where t= ", t)
-    @load slice_path psi0
-    return psi0
+    @load slice_path rho0
+    return rho0
 end
 
 function generate_slice_path(t, N, t1, t2, tR, tD, J, U, Dmax, Dstep)
@@ -103,14 +106,18 @@ function generate_slice_path(t, N, t1, t2, tR, tD, J, U, Dmax, Dstep)
     return mps_path
 end
 
-function create_psi0_for_evolution(N::Int, load::Bool, loadsl, loadt, HS, mps_path, slice_path, psi0)
+function create_rho0_for_evolution(N::Int, load::Bool, loadsl, loadt, HS, mps_path, slice_path, psi0, initD, Dstep, Dmax)
     if load
         if loadsl
-            psi     = load_slice(slice_path, loadt)
+            rho0    = load_slice(slice_path, loadt)
+        else
+            rho0    = outer(psi0, psi0';maxdim=Dmax, cutoff=1e-6)
+        end
     else
         energy, psi = dmrg_GS(false, N, HS, mps_path, psi0, initD, Dstep, Dmax)
+        rho0        = outer(psi, psi';maxdim=Dmax, cutoff=1e-6)
     end
-    return psi
+    return rho0
 end
 
 function main()
@@ -133,13 +140,21 @@ function main()
     U     = args["U"]
     dt    = args["dt"]
     tsmax = args["tsmax"]
+    init_t= 0.0
+    if load && loadsl     # if load time slice, init t will be adjusted to loadt, or else init t = 0
+        init_t = loadt
+    end
+    mps_path  = generate_mps_path(N, t1, t2, tR, tD, J, U, Dmax, Dstep)
     load_path = generate_mps_path(N, t1, t2, tR, tD, J, U, Dload, Dstepload)
-    slice_path= generate_slice_path(t, N, t1, t2, tR, tD, J, U, Dmax, Dstep)
-    slice_load_path= generate_slice_path(t, N, t1, t2, tR, tD, J, U, Dload, Dstepload)
-    slice_path
+    # slice_path= generate_slice_path(t, N, t1, t2, tR, tD, J, U, Dmax, Dstep)
+    slice_load_path= generate_slice_path(loadt, N, t1, t2, tR, tD, J, U, Dload, Dstepload)
+    # slice_path
     sites, psi0  = create_psi0_for_dmrg(N, load, load_path)
     os    = system_ham(N, t1, t2, tR, tD, J, U)
     HS    = MPO(os, sites)
-    psi0  = create_psi0_for_evolution(N, load, loadsl, loadt, HS, mps_path, slice_load_path, psi0)
+    rho0  = create_rho0_for_evolution(N, load, loadsl, loadt, HS, mps_path, slice_load_path, psi0, initD, Dstep, Dmax)
+    println("Initial density matrix loaded")
+    SO_h_odd, SO_b_odd, SO_t_odd    = create_SO(sites, 1, N, N, "odd")
+    SO_h_even, SO_b_even, SO_t_even = create_SO(sites, 1, N, N, "even")
 end
 main()

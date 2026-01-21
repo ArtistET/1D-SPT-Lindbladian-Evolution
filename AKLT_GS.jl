@@ -164,7 +164,7 @@ function dmrg_GS(load, N, H, mps_path, psi0, initD, Dstep, Dmax; eps=1e-10)
         maxdim = min(initD+Dstep*(n-1) , Dmax)
         E_now, psi = dmrg(H, psi; nsweeps, maxdim, cutoff, noise)
         E_diff     = abs(E_now-energy)
-        EPS        = min(max(eps, E_now*eps/N),0.5)  #Care for the eps setting and adjust it immediatelt when things goes wrong.
+        EPS        = min(max(eps, abs(E_now*eps/N)),0.5)  #Care for the eps setting and adjust it immediatelt when things goes wrong.
         println("Now step No.", n, " , now energy difference ", E_diff)
         if E_diff < EPS && maxdim==Dmax
             break
@@ -270,4 +270,8 @@ function main()
         println("This phase is trivial")
     end
 end
-main()
+
+
+if abspath(PROGRAM_FILE) == @__FILE__ # only run this code when directly running, including will not trigger main()
+    main()
+end
