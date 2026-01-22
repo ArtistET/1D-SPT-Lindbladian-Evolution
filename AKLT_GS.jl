@@ -229,17 +229,19 @@ function measure(SO_head, SO_body, SO_tail, psi; cutoff=1e-10) # apply the opera
     return C_value, SO_value
 end
 
-function check_entanglement(psi, N; default_ee=1e-6)
+function check_entanglement(psi, N; default_ee=0.1)
     orthogonalize!(psi, N)
-    _,S,_ = svd(psi[N], (linkind(psi, N-1), siteind(psi,N)))
-    Sdim  = dim(S, 1)
-    n_less= 0
+    _,S,_  = svd(psi[N], (linkind(psi, N-1), siteind(psi,N)))
+    Sdim   = dim(S, 1)
+    n_less = 0
+    n_level= 1
     for n=1:Sdim
         if S[n,n]<default_ee
             n_less = n
-            println("The ", n, " th sigular value is small enough, which means less than ", default_ee)
-            println(S[n,n],S[n+1,n+1])
-            break
+            n_level+=1
+            println("The sigular value before", n, " th is in level ", n_level," , which means larger than ", default_ee)
+            default_ee /= 10
+            # println(S[n,n],S[n+1,n+1])
         end
     end
     if n_less == 0
@@ -277,6 +279,7 @@ function main()
 
     C_odd, SOV_odd     = measure(SO_h_odd, SO_b_odd, SO_t_odd, psi)
     C_even, SOV_even   = measure(SO_h_even, SO_b_even, SO_t_even, psi)
+    check_entanglement(psi, N)
     println("E= ", energy)
     println("Dmid= ", dim(linkind(psi, N))) #Get the linkdim of the middle of psi (N~N+1), which is also the maximum bond dimension in a finite MPS.
     println("complex SO_odd= ", C_odd, "  SO_odd= ", SOV_odd)
@@ -288,7 +291,6 @@ function main()
     else
         println("This phase is trivial")
     end
-    check_entanglement(psi, N)
 end
 
 
