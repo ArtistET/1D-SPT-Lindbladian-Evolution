@@ -234,7 +234,7 @@ function check_entanglement(psi, N; default_ee=0.1)
     _,S,_  = svd(psi[N], (linkind(psi, N-1), siteind(psi,N)))
     Sdim   = dim(S, 1)
     n_less = 0
-    n_level= 1
+    n_level= 0
     for n=1:Sdim
         if S[n,n]<default_ee
             n_less = n
