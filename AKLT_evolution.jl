@@ -98,6 +98,10 @@ function load_slice(slice_path, t)
     return rho0
 end
 
+function save_slice(rho0, mps_path)
+    @save mps_path rho0
+end
+
 function generate_slice_path(t, N, t1, t2, tR, tD, J, U, Dmax, Dstep)
     if !isdir("./psi_evolution/T$(t)_N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(Dmax)/Dstep$(Dstep)")
          mkpath("./psi_evolution/T$(t)_N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)/Dmax$(Dmax)/Dstep$(Dstep)")
@@ -111,13 +115,22 @@ function create_rho0_for_evolution(N::Int, load::Bool, loadsl, loadt, HS, mps_pa
         if loadsl
             rho0    = load_slice(slice_path, loadt)
         else
-            rho0    = outer(psi0, psi0';maxdim=Dmax, cutoff=1e-6)
+            rho0    = outer(psi0', psi0;maxdim=Dmax, cutoff=1e-6)
         end
     else
         energy, psi = dmrg_GS(N, HS, mps_path, psi0, initD, Dstep, Dmax)
-        rho0        = outer(psi, psi';maxdim=Dmax, cutoff=1e-6)
+        rho0        = outer(psi', psi;maxdim=Dmax, cutoff=1e-6)
     end
     return rho0
+end
+
+function measure_SO_for_rho(SO_head,SO_body,SO_tail,identity,rho_t)
+    rho_t_after = apply(SO_head, rho_t)
+    rho_t_after = apply(SO_body, rho_t_after)
+    rho_t_after = apply(SO_tail, rho_t_after)
+    C_value     = -inner(identity, rho_t_after)
+    SO_value    = real(C_value)
+    return C_value, SO_value
 end
 
 function main()
@@ -150,9 +163,10 @@ function main()
     slice_load_path= generate_slice_path(loadt, N, t1, t2, tR, tD, J, U, Dload, Dstepload)
     # slice_path
     sites, psi0  = create_psi0_for_dmrg(N, load, load_path)
-    os    = system_ham(N, t1, t2, tR, tD, J, U)
-    HS    = MPO(os, sites)
-    rho0  = create_rho0_for_evolution(N, load, loadsl, loadt, HS, mps_path, slice_load_path, psi0, initD, Dstep, Dmax)
+    os       = system_ham(N, t1, t2, tR, tD, J, U)
+    HS       = MPO(os, sites)
+    identity = MPO(sites,"Id")
+    rho0     = create_rho0_for_evolution(N, load, loadsl, loadt, HS, mps_path, slice_load_path, psi0, initD, Dstep, Dmax)
     println("Initial density matrix loaded")
     SO_h_odd, SO_b_odd, SO_t_odd    = create_SO(sites, 1, N, N, "odd")
     SO_h_even, SO_b_even, SO_t_even = create_SO(sites, 1, N, N, "even")
