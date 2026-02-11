@@ -239,7 +239,7 @@ function check_entanglement(psi, N; default_ee=0.1)
         if S[n,n]<default_ee
             n_less = n
             n_level+=1
-            println("The sigular value before ", n, " th is in level ", n_level," , which means larger than ", default_ee)
+            println("The singular value before ", n, " th is in level ", n_level," , which means larger than ", default_ee)
             default_ee /= 10
             # println(S[n,n],S[n+1,n+1])
         end
