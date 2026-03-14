@@ -272,8 +272,13 @@ function main()
     os    = system_ham(N, t1, t2, tR, tD, J, U)
     HS    = MPO(os, sites)
 
-    SO_h_odd, SO_b_odd, SO_t_odd    = create_SO(sites, 1, N, N, "odd")
-    SO_h_even, SO_b_even, SO_t_even = create_SO(sites, 1, N, N, "even")
+    # SO_h_odd, SO_b_odd, SO_t_odd    = create_SO(sites, 1, N, N, "odd")
+    # SO_h_even, SO_b_even, SO_t_even = create_SO(sites, 1, N, N, "even")
+    idx_st = div(N,4)
+    idx_ed = N-div(N,4)
+    SO_h_odd, SO_b_odd, SO_t_odd    = create_SO(sites, idx_st, idx_ed, N, "odd")
+    SO_h_even, SO_b_even, SO_t_even = create_SO(sites, idx_st, idx_ed, N, "even")
+
 
     energy,psi = dmrg_GS(N, HS, mps_path, psi0, initD, Dstep, Dmax)
 

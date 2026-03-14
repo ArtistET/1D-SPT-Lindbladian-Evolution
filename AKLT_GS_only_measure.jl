@@ -71,8 +71,8 @@ function main()
     load_path = generate_mps_path(N, t1, t2, tR, tD, J, U, Dmax, Dstep)
     sites, psi = create_psi0_for_dmrg(N, load, load_path)
 
-    idx_st = div(N,4)
-    idx_ed = N-div(N,4)
+    idx_st = div(N,5)
+    idx_ed = N-div(N,5)
     SO_h_odd, SO_b_odd, SO_t_odd    = create_SO(sites, idx_st, idx_ed, N, "odd")
     SO_h_even, SO_b_even, SO_t_even = create_SO(sites, idx_st, idx_ed, N, "even")
 
