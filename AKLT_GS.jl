@@ -164,7 +164,8 @@ function dmrg_GS( N, H, mps_path, psi0, initD, Dstep, Dmax; eps=1e-10)
         maxdim = min(initD+Dstep*(n-1) , Dmax)
         E_now, psi = dmrg(H, psi; nsweeps, maxdim, cutoff, noise)
         E_diff     = abs(E_now-energy)
-        EPS        = min(max(eps, abs(E_now*eps/N)),0.5)  #Care for the eps setting and adjust it immediatelt when things goes wrong.
+        # EPS        = min(max(eps, abs(E_now*eps/N)),0.5)  #Care for the eps setting and adjust it immediatelt when things goes wrong.
+        EPS        = eps*100   #According to log, E_diff should be less than 1e-8
         println("Now step No.", n, " , now energy difference ", E_diff)
         if E_diff < EPS && maxdim==Dmax
             break
