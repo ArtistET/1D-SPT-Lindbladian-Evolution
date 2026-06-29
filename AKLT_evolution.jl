@@ -403,4 +403,7 @@ function main()
     IN = MPO(sites,"Id")
     Lindblad_evolution(dt,tsmax,init_t,N, t1, t2, tR, tD, J, U, I1, I2, IR, ID, Dmax,rho0,K0,K0_dag,K_list,Kdag_list,SO_h_odd, SO_b_odd, SO_t_odd,SO_h_even, SO_b_even, SO_t_even,IN)
 end
-main()
+
+if abspath(PROGRAM_FILE) == @__FILE__ # only run this code when directly running, including will not trigger main()
+    main()
+end
