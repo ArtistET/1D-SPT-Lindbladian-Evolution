@@ -3,3 +3,4 @@ psi_evolution/*
 test.jl
 AIcode.jl
 .claude/*
+*.sh

@@ -61,19 +61,19 @@ function parse_commandline()
             help = "The coupling J"
             default = 0
             arg_type = Float64
-        "-I1"
+        "--I1"
             help = "The intensity of in-ladder1 hopping operators"
             default = 0.1
             arg_type = Float64
-        "-I2"
+        "--I2"
             help = "The intensity of in-ladder2 hopping operators"
             default = 0.1
             arg_type = Float64
-        "-IR"
+        "--IR"
             help = "The intensity of in-site hopping operators"
             default = 0.1
             arg_type = Float64
-        "-ID"
+        "--ID"
             help = "The intensity of diagonal hopping operators"
             default = 0.1
             arg_type = Float64
