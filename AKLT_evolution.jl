@@ -316,8 +316,8 @@ function single_op_Lindblad(A,rho,Adag;cutoff=1e-8,maxdim=400)
     # tmp = apply(rho,Adag)
     # println("maxdim in contraction = ", maxlinkdim(tmp))
     # rho1 = apply(A,tmp;cutoff=cutoff,maxdim=maxdim)
-    # # rho1 = apply(A,apply(rho,Adag);cutoff=cutoff,maxdim=maxdim)  # more precise
-    # rho1 = apply(A,apply(rho,Adag;cutoff=cutoff,maxdim=maxdim);cutoff=cutoff,maxdim=maxdim)  # more available
+    # rho1 = apply(A,apply(rho,Adag);cutoff=cutoff,maxdim=maxdim)  # more precise
+    rho1 = apply(A,apply(rho,Adag;cutoff=cutoff,maxdim=maxdim);cutoff=cutoff,maxdim=maxdim)  # more available
     return rho1
 end
 function single_step_Lindblad(rho,K0,K0_dag,K_list::Vector{MPO},Kdag_list::Vector{MPO};block_size=4,cutoff=1e-8,maxdim=400)
