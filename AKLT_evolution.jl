@@ -140,11 +140,21 @@ end
 #     return rho0
 # end
 
-function measure_SO_for_rho(SO_head,SO_body,SO_tail,identity,rho_t)
+function SO_MPO(sites,SO_head,SO_body,SO_tail;cutoff=1e-8,maxdim=400)
+    so_mpo = MPO(sites,"Id")
+    so_mpo = apply(SO_head, so_mpo;cutoff=cutoff,maxdim=maxdim)
+    for local_rot in SO_body
+        so_mpo = apply(local_rot, so_mpo;cutoff=cutoff,maxdim=maxdim)
+    end
+    so_mpo = apply(SO_tail, so_mpo;cutoff=cutoff,maxdim=maxdim)
+    return so_mpo
+end
+
+function measure_SO_for_rho(SO_head,SO_body,SO_tail,IN,rho_t)
     rho_t_after = apply(SO_head, rho_t)
     rho_t_after = apply(SO_body, rho_t_after)
     rho_t_after = apply(SO_tail, rho_t_after)
-    C_value     = -inner(identity, rho_t_after)
+    C_value     = -inner(IN, rho_t_after)
     SO_value    = real(C_value)
     return C_value, SO_value
 end
@@ -153,6 +163,7 @@ function get_sites_rho0_HS(N::Int, t1, t2, tR, tD, J, U, load::Bool, loadsl::Boo
     if load 
         if loadsl
             rho0    = load_slice(slice_load_path, loadt)
+            psi0    = nothing
             sites   = firstsiteinds(rho0; plev=0)
             os      = system_ham(N, t1, t2, tR, tD, J, U)
             HS      = MPO(os, sites)
@@ -160,16 +171,16 @@ function get_sites_rho0_HS(N::Int, t1, t2, tR, tD, J, U, load::Bool, loadsl::Boo
             sites, psi0  = create_psi0_for_dmrg(N, load, load_path)
             os           = system_ham(N, t1, t2, tR, tD, J, U)
             HS           = MPO(os, sites)
-            rho0    = outer(psi0', psi0;maxdim=Dmax, cutoff=1e-6)
+            rho0         = outer(psi0', psi0;maxdim=Dmax, cutoff=1e-6)
         end
     else
-        sites, psi0  = create_psi0_for_dmrg(N, load, load_path)
-        os           = system_ham(N, t1, t2, tR, tD, J, U)
-        HS           = MPO(os, sites)
-        energy, psi = dmrg_GS(N, HS, mps_path, psi0, initD, Dstep, Dmax)
-        rho0        = outer(psi', psi;maxdim=Dmax, cutoff=1e-6)
+        sites, psi00  = create_psi0_for_dmrg(N, load, load_path)
+        os            = system_ham(N, t1, t2, tR, tD, J, U)
+        HS            = MPO(os, sites)
+        energy, psi0  = dmrg_GS(N, HS, mps_path, psi00, initD, Dstep, Dmax)
+        rho0          = outer(psi', psi;maxdim=Dmax, cutoff=1e-6)
     end
-    return sites, rho0, HS
+    return sites,psi0 , rho0, HS
 end
 
 function create_hopping(sites, HS, dt,N::Int64, I1::Float64, I2::Float64, IR::Float64, ID::Float64) #hopping operators for Lindblad
@@ -368,6 +379,12 @@ function Lindblad_evolution(dt,tsmax,init_t, N, t1, t2, tR, tD, J, U, I1, I2, IR
     return nothing
 end
 
+function test_tr_rho(SO_mpo,IN,rho)
+    rho_after= apply(SO_mpo,rho)
+    ans = -inner(IN,rho_after)
+    return ans
+end
+
 function main()
     args = parse_commandline()
     @show args
@@ -403,16 +420,31 @@ function main()
     # slice_path
     # sites, psi0  = create_psi0_for_dmrg(N, load, load_path)
     t_load = time()
-    sites, rho0, HS  = get_sites_rho0_HS(N, t1, t2, tR, tD, J, U,load,loadsl,loadt, mps_path,load_path,slice_load_path, initD, Dstep, Dmax)
+    sites, psi0 ,rho0, HS  = get_sites_rho0_HS(N, t1, t2, tR, tD, J, U,load,loadsl,loadt, mps_path,load_path,slice_load_path, initD, Dstep, Dmax)
     # os       = system_ham(N, t1, t2, tR, tD, J, U)
     # HS       = MPO(os, sites)
     # rho0     = create_rho0_for_evolution(N, load, loadsl, loadt, HS, mps_path, slice_load_path, psi0, initD, Dstep, Dmax)
     println("Initial density matrix loaded in ", format_hms(time()-t_load), " (hh:mm:ss)")
     t_ops = time()
-    SO_h_odd, SO_b_odd, SO_t_odd    = create_SO(sites, 1, N, N, "odd")
-    SO_h_even, SO_b_even, SO_t_even = create_SO(sites, 1, N, N, "even")
-    K0,K0_dag,K_list,Kdag_list      = create_hopping(sites, HS, dt,N, I1, I2, IR, ID)
+    idx_st = div(N,4)
+    idx_ed = N-div(N,4)
+    SO_h_odd, SO_b_odd, SO_t_odd    = create_SO(sites, idx_st, idx_ed, N, "odd")
+    SO_h_even, SO_b_even, SO_t_even = create_SO(sites, idx_st, idx_ed, N, "even")
+
+    # ===============testing===============================================
+    SO_mpo_odd                      = SO_MPO(sites, SO_h_odd, SO_b_odd, SO_t_odd; maxdim = Dmax)
+    SO_mpo_even                     = SO_MPO(sites, SO_h_even, SO_b_even, SO_t_even; maxdim = Dmax)
+    SO_0_odd = -inner(psi0',SO_mpo_odd,psi0)
+    SO_0_even = -inner(psi0',SO_mpo_even,psi0)
+    println("Initial SO_odd = ", SO_0_odd, " SO_even= ", SO_0_even)
     IN = MPO(sites,"Id")
+    println("For density matrix method","="^30)
+    SO_1_odd = test_tr_rho(SO_mpo_odd,IN,rho0)
+    SO_1_even = test_tr_rho(SO_mpo_even,IN,rho0)
+    println("Initial SO_odd = ", SO_1_odd, " SO_even= ", SO_1_even)
+    # ======================================================================
+
+    K0,K0_dag,K_list,Kdag_list      = create_hopping(sites, HS, dt,N, I1, I2, IR, ID)
     println("SO / Lindblad operators built in ", format_hms(time()-t_ops), " (hh:mm:ss)")
     Lindblad_evolution(dt,tsmax,init_t,N, t1, t2, tR, tD, J, U, I1, I2, IR, ID, Dmax,rho0,K0,K0_dag,K_list,Kdag_list,SO_h_odd, SO_b_odd, SO_t_odd,SO_h_even, SO_b_even, SO_t_even,IN)
 end
