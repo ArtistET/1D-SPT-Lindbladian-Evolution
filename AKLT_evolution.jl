@@ -337,6 +337,14 @@ function single_step_Lindblad(rho,K0,K0_dag,K_list::Vector{MPO},Kdag_list::Vecto
     rho_ans = tree_sum(rho_list;cutoff=cutoff,maxdim=maxdim)
     return rho_ans
 end
+function format_hms(sec) # format a duration (in seconds) as HH:MM:SS.mmm
+    ms   = round(Int, (sec - floor(sec)) * 1000)
+    isec = floor(Int, sec)
+    h    = div(isec, 3600)
+    m    = div(isec % 3600, 60)
+    s    = isec % 60
+    return string(lpad(h,2,'0'), ":", lpad(m,2,'0'), ":", lpad(s,2,'0'), ".", lpad(ms,3,'0'))
+end
 function Lindblad_evolution(dt,tsmax,init_t, N, t1, t2, tR, tD, J, U, I1, I2, IR, ID, Dmax,rho,K0,K0_dag,K_list,Kdag_list,SO_h_odd, SO_b_odd, SO_t_odd,SO_h_even, SO_b_even, SO_t_even,IN;block_size=8,cutoff=1e-8)
     for i = 1:tsmax
         slice_path_t = generate_slice_path(init_t+dt*(i-1), N, t1, t2, tR, tD, J, U, I1, I2, IR, ID, Dmax)
@@ -346,7 +354,9 @@ function Lindblad_evolution(dt,tsmax,init_t, N, t1, t2, tR, tD, J, U, I1, I2, IR
         println("At T = ", init_t+dt*(i-1),"="^30)
         println("complex SO_odd= ", C_odd, "  SO_odd= ", SOV_odd)
         println("complex SO_even= ", C_even, "  SO_even= ", SOV_even)
+        t_step = time()
         rho = single_step_Lindblad(rho,K0,K0_dag,K_list,Kdag_list;block_size=block_size,cutoff=cutoff,maxdim=Dmax)
+        println("Step ", i, "/", tsmax, " (T ", round(init_t+dt*(i-1), digits=6), " -> ", round(init_t+dt*i, digits=6), ") took ", format_hms(time()-t_step), " (hh:mm:ss) , maxlinkdim(rho)= ", maxlinkdim(rho))
     end
     slice_path_t = generate_slice_path(init_t+dt*tsmax, N, t1, t2, tR, tD, J, U, I1, I2, IR, ID, Dmax)
     save_slice(rho, slice_path_t)
@@ -392,15 +402,18 @@ function main()
     slice_load_path= generate_slice_path(loadt, N, t1, t2, tR, tD, J, U, I1, I2, IR, ID, Dload)
     # slice_path
     # sites, psi0  = create_psi0_for_dmrg(N, load, load_path)
+    t_load = time()
     sites, rho0, HS  = get_sites_rho0_HS(N, t1, t2, tR, tD, J, U,load,loadsl,loadt, mps_path,load_path,slice_load_path, initD, Dstep, Dmax)
     # os       = system_ham(N, t1, t2, tR, tD, J, U)
     # HS       = MPO(os, sites)
     # rho0     = create_rho0_for_evolution(N, load, loadsl, loadt, HS, mps_path, slice_load_path, psi0, initD, Dstep, Dmax)
-    println("Initial density matrix loaded")
+    println("Initial density matrix loaded in ", format_hms(time()-t_load), " (hh:mm:ss)")
+    t_ops = time()
     SO_h_odd, SO_b_odd, SO_t_odd    = create_SO(sites, 1, N, N, "odd")
     SO_h_even, SO_b_even, SO_t_even = create_SO(sites, 1, N, N, "even")
     K0,K0_dag,K_list,Kdag_list      = create_hopping(sites, HS, dt,N, I1, I2, IR, ID)
     IN = MPO(sites,"Id")
+    println("SO / Lindblad operators built in ", format_hms(time()-t_ops), " (hh:mm:ss)")
     Lindblad_evolution(dt,tsmax,init_t,N, t1, t2, tR, tD, J, U, I1, I2, IR, ID, Dmax,rho0,K0,K0_dag,K_list,Kdag_list,SO_h_odd, SO_b_odd, SO_t_odd,SO_h_even, SO_b_even, SO_t_even,IN)
 end
 
