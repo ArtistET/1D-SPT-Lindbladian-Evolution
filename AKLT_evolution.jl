@@ -390,7 +390,7 @@ end
 
 function test_tr_rho(SO_mpo,IN,rho)
     rho_after= apply(SO_mpo,rho)
-    ans = -inner(IN,rho_after)
+    ans = -inner(IN,rho_after)/inner(IN, rho)
     return ans
 end
 
