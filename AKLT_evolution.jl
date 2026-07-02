@@ -454,6 +454,7 @@ function main()
     # ======================================================================
 
     K0,K0_dag,K_list,Kdag_list      = create_hopping(sites, HS, dt,N, I1, I2, IR, ID)
+    check_maxdim(K0,K_list)
     println("SO / Lindblad operators built in ", format_hms(time()-t_ops), " (hh:mm:ss)")
     Lindblad_evolution(dt,tsmax,init_t,N, t1, t2, tR, tD, J, U, I1, I2, IR, ID, Dmax,rho0,K0,K0_dag,K_list,Kdag_list,SO_h_odd, SO_b_odd, SO_t_odd,SO_h_even, SO_b_even, SO_t_even,IN)
 end
