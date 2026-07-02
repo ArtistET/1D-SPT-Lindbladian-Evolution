@@ -154,7 +154,7 @@ function measure_SO_for_rho(SO_head,SO_body,SO_tail,IN,rho_t)
     rho_t_after = apply(SO_head, rho_t)
     rho_t_after = apply(SO_body, rho_t_after)
     rho_t_after = apply(SO_tail, rho_t_after)
-    C_value     = -inner(IN, rho_t_after)
+    C_value     = -inner(IN, rho_t_after)/inner(IN, rho_t)
     SO_value    = real(C_value)
     return C_value, SO_value
 end
@@ -330,6 +330,15 @@ function single_op_Lindblad(A,rho,Adag;cutoff=1e-8,maxdim=400)
     # rho1 = apply(A,apply(rho,Adag);cutoff=cutoff,maxdim=maxdim)  # more precise
     rho1 = apply(A,apply(rho,Adag;cutoff=cutoff,maxdim=maxdim);cutoff=cutoff,maxdim=maxdim)  # more available
     return rho1
+end
+function check_maxdim(K0,K_list)
+    maxdim_list=[]
+    push!(maxdim_list, maxlinkdim(K0))
+    for Ki in K_list
+        push!(maxdim_list, maxlinkdim(Ki))
+    end
+    println("bond dimensions for operators are ", maxdim_list)
+    return 0
 end
 function single_step_Lindblad(rho,K0,K0_dag,K_list::Vector{MPO},Kdag_list::Vector{MPO};block_size=4,cutoff=1e-8,maxdim=400)
     buffer   = MPO[]
