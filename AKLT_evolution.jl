@@ -358,6 +358,7 @@ function single_step_Lindblad(rho,K0,K0_dag,K_list::Vector{MPO},Kdag_list::Vecto
     println("K0 applied, progress 1/", 1+length(K_list))  #for tesing 
     push!(buffer, rho_0)
     for i = 1:length(K_list)
+        t_st = time()
         rho_i = single_op_Lindblad(K_list[i],rho,Kdag_list[i];cutoff=cutoff,maxdim=maxdim)
         push!(buffer,rho_i)
         if length(buffer)== block_size || i==length(K_list)
@@ -365,7 +366,7 @@ function single_step_Lindblad(rho,K0,K0_dag,K_list::Vector{MPO},Kdag_list::Vecto
             push!(rho_list,rho_sum)
             empty!(buffer)
         end
-        println("K",i," applied, progress ", i+1,"/", 1+length(K_list)) #for testing
+        println("K",i," applied, progress ", i+1,"/", 1+length(K_list),"step cost",format_hms(time()-t_st), " (hh:mm:ss)") #for testing
     end
     rho_ans = tree_sum(rho_list;cutoff=cutoff,maxdim=maxdim)
     return rho_ans
