@@ -305,6 +305,14 @@ function create_hopping(sites, HS, dt,N::Int64, I1::Float64, I2::Float64, IR::Fl
     
     return K0,K0_dag,K_list,Kdag_list
 end
+function format_hms(sec) # format a duration (in seconds) as HH:MM:SS.mmm
+    ms   = round(Int, (sec - floor(sec)) * 1000)
+    isec = floor(Int, sec)
+    h    = div(isec, 3600)
+    m    = div(isec % 3600, 60)
+    s    = isec % 60
+    return string(lpad(h,2,'0'), ":", lpad(m,2,'0'), ":", lpad(s,2,'0'), ".", lpad(ms,3,'0'))
+end
 function tree_sum(terms::Vector{MPO};cutoff=1e-8,maxdim=400)
     current = copy(terms)
     while length(current) >1
@@ -312,8 +320,10 @@ function tree_sum(terms::Vector{MPO};cutoff=1e-8,maxdim=400)
         i=1
         while i< length(current)
             tmp = current[i]+current[i+1]
+            tbefore = time() #for testing 
             truncate!(tmp;cutoff=cutoff,maxdim=maxdim)
             push!(next,tmp)
+            println("One sum step over ,time cost=", format_hms(time()-tbefore)," (hh:mm:ss)") #for testing 
             i +=2
         end
         if isodd(length(current))
@@ -321,6 +331,7 @@ function tree_sum(terms::Vector{MPO};cutoff=1e-8,maxdim=400)
         end
         current = next
     end
+    println("Tree sum over") #for testing 
     return current[1]
 end
 function single_op_Lindblad(A,rho,Adag;cutoff=1e-8,maxdim=400)
@@ -337,7 +348,7 @@ function check_maxdim(K0,K_list)
     for Ki in K_list
         push!(maxdim_list, maxlinkdim(Ki))
     end
-    println("bond dimensions for operators are ", maxdim_list)
+    println("bond dimensions for operators are ", maxdim_list," with total operator number =", length(maxdim_list))
     return 0
 end
 function single_step_Lindblad(rho,K0,K0_dag,K_list::Vector{MPO},Kdag_list::Vector{MPO};block_size=4,cutoff=1e-8,maxdim=400)
@@ -354,20 +365,12 @@ function single_step_Lindblad(rho,K0,K0_dag,K_list::Vector{MPO},Kdag_list::Vecto
             push!(rho_list,rho_sum)
             empty!(buffer)
         end
-        println("K",i+1," applied, progress ", i+1,"/", 1+length(K_list)) #for testing
+        println("K",i," applied, progress ", i+1,"/", 1+length(K_list)) #for testing
     end
     rho_ans = tree_sum(rho_list;cutoff=cutoff,maxdim=maxdim)
     return rho_ans
 end
-function format_hms(sec) # format a duration (in seconds) as HH:MM:SS.mmm
-    ms   = round(Int, (sec - floor(sec)) * 1000)
-    isec = floor(Int, sec)
-    h    = div(isec, 3600)
-    m    = div(isec % 3600, 60)
-    s    = isec % 60
-    return string(lpad(h,2,'0'), ":", lpad(m,2,'0'), ":", lpad(s,2,'0'), ".", lpad(ms,3,'0'))
-end
-function Lindblad_evolution(dt,tsmax,init_t, N, t1, t2, tR, tD, J, U, I1, I2, IR, ID, Dmax,rho,K0,K0_dag,K_list,Kdag_list,SO_h_odd, SO_b_odd, SO_t_odd,SO_h_even, SO_b_even, SO_t_even,IN;block_size=8,cutoff=1e-8)
+function Lindblad_evolution(dt,tsmax,init_t, N, t1, t2, tR, tD, J, U, I1, I2, IR, ID, Dmax,rho,K0,K0_dag,K_list,Kdag_list,SO_h_odd, SO_b_odd, SO_t_odd,SO_h_even, SO_b_even, SO_t_even,IN;block_size=4,cutoff=1e-8)
     for i = 1:tsmax
         slice_path_t = generate_slice_path(init_t+dt*(i-1), N, t1, t2, tR, tD, J, U, I1, I2, IR, ID, Dmax)
         save_slice(rho, slice_path_t)
