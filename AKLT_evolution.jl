@@ -178,7 +178,7 @@ function get_sites_rho0_HS(N::Int, t1, t2, tR, tD, J, U, load::Bool, loadsl::Boo
         os            = system_ham(N, t1, t2, tR, tD, J, U)
         HS            = MPO(os, sites)
         energy, psi0  = dmrg_GS(N, HS, mps_path, psi00, initD, Dstep, Dmax)
-        rho0          = outer(psi', psi;maxdim=Dmax, cutoff=1e-6)
+        rho0          = outer(psi0', psi0;maxdim=Dmax, cutoff=1e-6)
     end
     return sites,psi0 , rho0, HS
 end
@@ -449,9 +449,13 @@ function main()
     # ===============testing===============================================
     SO_mpo_odd                      = SO_MPO(sites, SO_h_odd, SO_b_odd, SO_t_odd; maxdim = Dmax)
     SO_mpo_even                     = SO_MPO(sites, SO_h_even, SO_b_even, SO_t_even; maxdim = Dmax)
-    SO_0_odd = -inner(psi0',SO_mpo_odd,psi0)
-    SO_0_even = -inner(psi0',SO_mpo_even,psi0)
-    println("Initial SO_odd = ", SO_0_odd, " SO_even= ", SO_0_even)
+    if psi0 !== nothing
+        SO_0_odd = -inner(psi0',SO_mpo_odd,psi0)
+        SO_0_even = -inner(psi0',SO_mpo_even,psi0)
+        println("Initial SO_odd = ", SO_0_odd, " SO_even= ", SO_0_even)
+    else
+        println("As we load time slice, no psi0 exists, therefore no testing for MPS method.")
+    end
     IN = MPO(sites,"Id")
     println("For density matrix method","="^30)
     SO_1_odd = test_tr_rho(SO_mpo_odd,IN,rho0)
