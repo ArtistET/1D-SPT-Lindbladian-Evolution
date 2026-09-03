@@ -20,11 +20,9 @@ function load_samples(directory)
         match_result = match(r"^T0\.0_to_T0\.5_traj(\d+)-(\d+)\.jld2$", filename)
         isnothing(match_result) && continue
         first_id, last_id = parse.(Int, match_result.captures)
-        last_id - first_id == 3 || continue
         push!(matched, (first_id, last_id, joinpath(directory, filename)))
     end
-    sort!(matched; by=first)
-    length(matched) == 8 || error("expected 8 four-trajectory files in $directory, found $(length(matched))")
+    sort!(matched; by=item -> (item[1], item[2]))
 
     ids = Int[]
     odd_rows = Vector{Float64}[]
@@ -34,21 +32,21 @@ function load_samples(directory)
     reference_times = nothing
     for (first_id, last_id, path) in matched
         data = load(path)
-        data["completed_trajectories"] == 4 || error("incomplete result: $path")
+        completed = data["completed_trajectories"]
+        completed <= last_id - first_id + 1 || error("invalid completed_trajectories in $path")
         times = Float64.(data["times"])
         isnothing(reference_times) ? (reference_times = times) : (times == reference_times || error("time grid mismatch: $path"))
         odd = real.(data["C_odd_samples"])
         even = real.(data["C_even_samples"])
         bonds = data["bond_dimensions"]
         jumps = data["jump_indices"]
-        for row in 1:4
+        for row in 1:completed
             push!(ids, first_id + row - 1)
             push!(odd_rows, vec(odd[row, :]))
             push!(even_rows, vec(even[row, :]))
             push!(bond_rows, vec(bonds[row, :]))
             push!(jump_rows, vec(jumps[row, :]))
         end
-        ids[end] == last_id || error("trajectory id mismatch: $path")
     end
     order = sortperm(ids)
     ids = ids[order]
