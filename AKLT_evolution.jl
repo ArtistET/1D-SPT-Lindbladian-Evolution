@@ -359,7 +359,7 @@ function prepare_system(args)
 end
 
 function save_results(path, args, times, C_odd_samples, C_even_samples, jump_indices,
-    total_jump_probabilities, branch_weights, measurement_seconds, evolution_seconds,
+    total_jump_probabilities, branch_weights, bond_dimensions, measurement_seconds, evolution_seconds,
     checkpoint_seconds, completed_trajectories; final=false)
     if final
         SO_odd_mean = vec(mean(real.(C_odd_samples); dims=1))
@@ -371,9 +371,9 @@ function save_results(path, args, times, C_odd_samples, C_even_samples, jump_ind
             SO_odd_stderr = fill(NaN, length(times))
             SO_even_stderr = fill(NaN, length(times))
         end
-        @save path args times C_odd_samples C_even_samples SO_odd_mean SO_even_mean SO_odd_stderr SO_even_stderr jump_indices total_jump_probabilities branch_weights measurement_seconds evolution_seconds checkpoint_seconds completed_trajectories
+        @save path args times C_odd_samples C_even_samples SO_odd_mean SO_even_mean SO_odd_stderr SO_even_stderr jump_indices total_jump_probabilities branch_weights bond_dimensions measurement_seconds evolution_seconds checkpoint_seconds completed_trajectories
     else
-        @save path args times C_odd_samples C_even_samples jump_indices total_jump_probabilities branch_weights measurement_seconds evolution_seconds checkpoint_seconds completed_trajectories
+        @save path args times C_odd_samples C_even_samples jump_indices total_jump_probabilities branch_weights bond_dimensions measurement_seconds evolution_seconds checkpoint_seconds completed_trajectories
     end
 end
 
@@ -423,6 +423,7 @@ function run_trajectories(args, sites, psi_initial, HS)
     jump_indices = zeros(Int, ntraj, tsmax)
     total_jump_probabilities = fill(NaN, ntraj, tsmax)
     branch_weights = fill(NaN, ntraj, tsmax)
+    bond_dimensions = zeros(Int, ntraj, tsmax + 1)
     measurement_seconds = zeros(ntraj, tsmax + 1)
     evolution_seconds = zeros(ntraj, tsmax)
     checkpoint_seconds = zeros(ntraj)
@@ -456,9 +457,11 @@ function run_trajectories(args, sites, psi_initial, HS)
             C_odd_samples[local_id, time_index], C_even_samples[local_id, time_index] =
                 measure_string_orders(psi, SO_odd, SO_even)
             measurement_seconds[local_id, time_index] = time() - measurement_start
+            bond_dimensions[local_id, time_index] = maxlinkdim(psi)
             println("Trajectory ", trajectory_id, " T=", time_label(times[time_index]),
                 " SO_odd=", real(C_odd_samples[local_id, time_index]),
                 " SO_even=", real(C_even_samples[local_id, time_index]),
+                " maxlinkdim=", bond_dimensions[local_id, time_index],
                 " measurement=", format_hms(measurement_seconds[local_id, time_index]))
 
             time_index > tsmax && break
@@ -486,7 +489,7 @@ function run_trajectories(args, sites, psi_initial, HS)
         end
         completed_trajectories = local_id
         save_results(output_path, args, times, C_odd_samples, C_even_samples, jump_indices,
-            total_jump_probabilities, branch_weights, measurement_seconds, evolution_seconds,
+            total_jump_probabilities, branch_weights, bond_dimensions, measurement_seconds, evolution_seconds,
             checkpoint_seconds, completed_trajectories)
         println("Trajectory ", trajectory_id, " finished in ", format_hms(time() - trajectory_wall))
         GC.gc()
@@ -494,7 +497,7 @@ function run_trajectories(args, sites, psi_initial, HS)
 
     save_start = time()
     save_results(output_path, args, times, C_odd_samples, C_even_samples, jump_indices,
-        total_jump_probabilities, branch_weights, measurement_seconds, evolution_seconds,
+        total_jump_probabilities, branch_weights, bond_dimensions, measurement_seconds, evolution_seconds,
         checkpoint_seconds, completed_trajectories; final=true)
     println("Final ensemble result saved to ", output_path, " in ", format_hms(time() - save_start))
     return output_path

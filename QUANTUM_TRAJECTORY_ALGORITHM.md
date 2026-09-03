@@ -471,6 +471,7 @@ $$
 - `jump_indices`：0 表示 no-jump，其余值表示 channel 编号；
 - `total_jump_probabilities`：每一步的 $p_{\rm jump}$；
 - `branch_weights`：所选分支归一化之前的范数平方；
+- `bond_dimensions`：每条轨迹在每个测量时刻的 MPS 最大键维；
 - `measurement_seconds`、`evolution_seconds`、`checkpoint_seconds`：分段计时。
 
 当 $M=1$ 时无法估计样本方差，所以标准误差保存为 `NaN`。
