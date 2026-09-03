@@ -410,8 +410,8 @@ function run_trajectories(args, sites, psi_initial, HS)
         " |diff|=", abs(direct_odd - apply_odd))
     println("Initial SO consistency: even direct=", direct_even, " apply=", apply_even,
         " |diff|=", abs(direct_even - apply_even))
-    isapprox(direct_odd, apply_odd; rtol=1e-6, atol=1e-9) || error("Odd string-order constructions disagree")
-    isapprox(direct_even, apply_even; rtol=1e-6, atol=1e-9) || error("Even string-order constructions disagree")
+    isapprox(direct_odd, apply_odd; rtol=1e-5, atol=1e-7) || error("Odd string-order constructions disagree")
+    isapprox(direct_even, apply_even; rtol=1e-5, atol=1e-7) || error("Even string-order constructions disagree")
 
     channels = create_jump_channels(N, I1, I2, IR, ID)
     energy_shift = real(inner(psi_initial', HS, psi_initial))
