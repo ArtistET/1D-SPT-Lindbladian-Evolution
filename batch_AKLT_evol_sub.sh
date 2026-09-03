@@ -12,27 +12,27 @@ ID=0.1
 # 注意：Dload/Dsload 必须与要加载文件的 Dmax/Dstep 对得上
 #   - load=true,  loadsl=false : 加载基态文件 (其 Dmax/Dstep)
 #   - load=true,  loadsl=true  : 加载演化切片文件 (其 Dmax/Dstep)
-Dload=400
-Dsload=50
+Dload=100
+Dsload=20
 # 加载/初始化控制
 load=true       # 是否加载初始态
 loadsl=false    # 是否从某个演化切片继续
 loadt=0.0       # 加载切片对应的时刻
 
 # 时间步进
-dt=0.01
-tsmax=3
+dt=0.05
+tsmax=10
 # 每个作业顺序计算的轨迹数。多个独立作业可用不同 traj_start 并行提交。
-ntraj=1
+ntraj=4
 traj_start=1
-njobs=1
-seed=1234
+njobs=8
+seed=260903
 cutoff=1e-8
 save_traj=false
 
 # ============ 其余信息（与 GS 批量脚本保持一致）============
-Dmax=400
-Dstep=50
+Dmax=100
+Dstep=20
 t1=0.1
 t2=0.2
 tR=1.0
@@ -43,14 +43,14 @@ for N in 10
 do
     for U in 10
     do
-        for tD in 0.98 
+        for tD in 0.98 0.99 1.0 1.01 1.02
         do
             for ((job_index=0; job_index<njobs; job_index++))
             do
                 this_traj_start=$((traj_start + job_index*ntraj))
                 echo "Submitting trajectory job for N=$N tD=$tD U=$U Dmax=$Dmax Dstep=$Dstep, loading D=$Dload Dstep=$Dsload, I=($I1,$I2,$IR,$ID), dt=$dt tsmax=$tsmax loadt=$loadt traj_start=$this_traj_start ntraj=$ntraj"
                 # initD=Dload 是有意的：不加载时从 checkpoint 对应的键维设置开始 DMRG。
-                sbatch sub_evol.sh $load $loadsl $loadt $N $Dmax $Dstep $t1 $t2 $tR $tD $J $I1 $I2 $IR $ID $Dload $Dload $Dsload $U $dt $tsmax $ntraj $this_traj_start $seed $cutoff $save_traj
+                sbatch -c 4 --mem=8G -t 03:00:00 sub_evol.sh $load $loadsl $loadt $N $Dmax $Dstep $t1 $t2 $tR $tD $J $I1 $I2 $IR $ID $Dload $Dload $Dsload $U $dt $tsmax $ntraj $this_traj_start $seed $cutoff $save_traj
             done
         done
     done
