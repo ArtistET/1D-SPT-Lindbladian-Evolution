@@ -26,9 +26,11 @@ isdefined(Main, :trajectory_step) || include("AKLT_evolution.jl")
         @test actual ≈ predicted[i] rtol=1e-9 atol=1e-12
     end
 
-    K0 = create_nojump_operator(sites, hamiltonian, dt, channels)
+    HS = MPO(hamiltonian, sites)
+    energy_shift = real(inner(psi', HS, psi))
+    K0 = create_nojump_operator(sites, hamiltonian, dt, channels; energy_shift=energy_shift)
     nojump_state = apply(K0, psi; cutoff=1e-12, maxdim=40)
-    reference_k0_sum = (-1im * dt) * hamiltonian + (1.0, "Id", 1)
+    reference_k0_sum = (-1im * dt) * hamiltonian + (1.0 + 1im * dt * energy_shift, "Id", 1)
     for channel in channels
         reference_k0_sum += -0.5 * dt * channel.rate^2,
             channel.create_op, channel.source,

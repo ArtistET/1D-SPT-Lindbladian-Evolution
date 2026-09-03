@@ -164,11 +164,13 @@ function create_jump_channels(N, I1, I2, IR, ID)
     return channels
 end
 
-function create_nojump_operator(sites, hamiltonian, dt, channels)
+function create_nojump_operator(sites, hamiltonian, dt, channels; energy_shift=0.0)
     # Construct K0 as one OpSum. Adding already-built MPOs triggers an expensive
     # generic MPO decomposition, and the paired directions obey exactly
     # L†_ab L_ab + L†_ba L_ba = rate²*(n_a+n_b-2*n_a*n_b).
-    os = (-1im * dt) * hamiltonian + (1.0, "Id", 1)
+    # A real scalar shift changes only the exact no-jump state's global phase.
+    # Removing the extensive ground-state energy greatly reduces Euler error.
+    os = (-1im * dt) * hamiltonian + (1.0 + 1im * dt * energy_shift, "Id", 1)
     @assert length(channels) % 4 == 0
     for first_channel in 1:4:length(channels)
         up_forward, up_reverse, dn_forward, dn_reverse = channels[first_channel:(first_channel + 3)]
@@ -409,8 +411,11 @@ function run_trajectories(args, sites, psi_initial, HS)
     isapprox(direct_even, apply_even; rtol=1e-6, atol=1e-9) || error("Even string-order constructions disagree")
 
     channels = create_jump_channels(N, I1, I2, IR, ID)
-    K0 = create_nojump_operator(sites, system_ham(N, t1, t2, tR, tD, J, U), dt, channels)
-    println("Built ", length(channels), " jump channels as metadata; maxlinkdim(K0)=", maxlinkdim(K0))
+    energy_shift = real(inner(psi_initial', HS, psi_initial))
+    K0 = create_nojump_operator(sites, system_ham(N, t1, t2, tR, tD, J, U), dt, channels;
+        energy_shift=energy_shift)
+    println("Built ", length(channels), " jump channels as metadata; maxlinkdim(K0)=", maxlinkdim(K0),
+        "; no-jump energy shift=", energy_shift)
 
     times = collect(range(init_t; step=dt, length=tsmax + 1))
     C_odd_samples = fill(ComplexF64(NaN, NaN), ntraj, tsmax + 1)
