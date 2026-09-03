@@ -401,8 +401,11 @@ function run_trajectories(args, sites, psi_initial, HS)
     SO_even = SO_MPO(sites, SO_h_even, SO_b_even, SO_t_even; cutoff=cutoff, maxdim=Dmax)
 
     direct_odd, direct_even = measure_string_orders(psi_initial, SO_odd, SO_even)
-    apply_odd, _ = measure(SO_h_odd, SO_b_odd, SO_t_odd, psi_initial; cutoff=cutoff, maxdim=Dmax)
-    apply_even, _ = measure(SO_h_even, SO_b_even, SO_t_even, psi_initial; cutoff=cutoff, maxdim=Dmax)
+    validation_maxdim = max(Dmax, maxlinkdim(psi_initial))
+    apply_odd, _ = measure(SO_h_odd, SO_b_odd, SO_t_odd, psi_initial;
+        cutoff=min(cutoff, 1e-10), maxdim=validation_maxdim)
+    apply_even, _ = measure(SO_h_even, SO_b_even, SO_t_even, psi_initial;
+        cutoff=min(cutoff, 1e-10), maxdim=validation_maxdim)
     println("Initial SO consistency: odd direct=", direct_odd, " apply=", apply_odd,
         " |diff|=", abs(direct_odd - apply_odd))
     println("Initial SO consistency: even direct=", direct_even, " apply=", apply_even,

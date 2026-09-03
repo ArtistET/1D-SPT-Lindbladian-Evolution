@@ -220,9 +220,11 @@ function create_SO(sites, i_st, i_end, N, odd_even::String) #observe the string 
 end
 
 function measure(SO_head, SO_body, SO_tail, psi; cutoff=1e-10, maxdim=typemax(Int)) # apply the operator to MPS to get the expectation
-    psi_after = apply(SO_head, psi; cutoff=cutoff, maxdim=maxdim)
+    # Keep this as a high-accuracy reference path: the SO factors are local,
+    # so intermediate truncation only introduces avoidable validation error.
+    psi_after = apply(SO_head, psi)
     for single_Rz in SO_body
-        psi_after = apply(single_Rz, psi_after; cutoff=cutoff, maxdim=maxdim)
+        psi_after = apply(single_Rz, psi_after)
     end
     psi_after = apply(SO_tail, psi_after; cutoff=cutoff, maxdim=maxdim)
     C_value = -inner(psi, psi_after)

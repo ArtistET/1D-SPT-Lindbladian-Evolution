@@ -436,7 +436,7 @@ C_even = -inner(psi', SO_even, psi)
 
 - 一条路径使用完整 SO MPO 直接收缩；
 - 一条路径依次 apply head/body/tail；
-- 两条路径现在使用相同的 `cutoff` 和 `maxdim`；
+- apply 路径作为高精度参考，不截断局域 head/body 的中间结果，只在 tail 使用不低于初态键维的 `maxdim`；
 - 若结果不满足 `rtol=1e-6, atol=1e-9`，程序停止。
 
 旧 MPDO 程序也保留初态的 `apply` 测量，并与 MPO–MPO 直接收缩比较。
