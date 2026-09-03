@@ -6,7 +6,7 @@ length(ARGS) == 2 || error("usage: julia --project=. analyze_trajectory_results.
 
 trajectory_root, output_path = ARGS
 tD_values = [0.98, 0.99, 1.0, 1.01, 1.02]
-sample_sizes = [4, 8, 16, 32]
+sample_sizes = [4, 8, 16, 32, 64]
 
 function result_directory(root, tD)
     parameter_dir = "N10_t(0.1,0.2)_tR1.0_tD$(tD)_J0.0_U10.0_I10.1_I20.1_IR0.1_ID0.1"
@@ -50,7 +50,7 @@ function load_samples(directory)
     end
     order = sortperm(ids)
     ids = ids[order]
-    ids == collect(1:32) || error("expected trajectory ids 1:32 in $directory, found $ids")
+    ids == collect(1:64) || error("expected trajectory ids 1:64 in $directory, found $ids")
     return reference_times, reduce(vcat, permutedims.(odd_rows[order])),
         reduce(vcat, permutedims.(even_rows[order])),
         reduce(vcat, permutedims.(bond_rows[order])),

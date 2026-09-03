@@ -24,7 +24,7 @@ dt=0.05
 tsmax=10
 # 每个作业顺序计算的轨迹数。多个独立作业可用不同 traj_start 并行提交。
 ntraj=4
-traj_start=1
+traj_start=33
 njobs=8
 seed=260903
 cutoff=1e-8
@@ -50,7 +50,7 @@ do
                 this_traj_start=$((traj_start + job_index*ntraj))
                 echo "Submitting trajectory job for N=$N tD=$tD U=$U Dmax=$Dmax Dstep=$Dstep, loading D=$Dload Dstep=$Dsload, I=($I1,$I2,$IR,$ID), dt=$dt tsmax=$tsmax loadt=$loadt traj_start=$this_traj_start ntraj=$ntraj"
                 # initD=Dload 是有意的：不加载时从 checkpoint 对应的键维设置开始 DMRG。
-                sbatch -c 4 --mem=8G -t 03:00:00 sub_evol.sh $load $loadsl $loadt $N $Dmax $Dstep $t1 $t2 $tR $tD $J $I1 $I2 $IR $ID $Dload $Dload $Dsload $U $dt $tsmax $ntraj $this_traj_start $seed $cutoff $save_traj
+                sbatch -c 4 --mem=8G -t 04:00:00 sub_evol.sh $load $loadsl $loadt $N $Dmax $Dstep $t1 $t2 $tR $tD $J $I1 $I2 $IR $ID $Dload $Dload $Dsload $U $dt $tsmax $ntraj $this_traj_start $seed $cutoff $save_traj
             done
         done
     done
