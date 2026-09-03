@@ -1,6 +1,12 @@
 ground_states/*
 psi_evolution/*
+trajectory_evolution/*
 test.jl
 AIcode.jl
 .claude/*
 *.sh
+!sub_evol.sh
+!batch_AKLT_evol_sub.sh
+*.md
+!QUANTUM_TRAJECTORY_ALGORITHM.md
+!README.md

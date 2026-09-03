@@ -93,7 +93,7 @@ function save_checkpoint(psi0, mps_path)
 end
 
 function create_sites(N::Int64)
-    sites = siteinds("Electron", 2*N; conserve_qns=false)#, conserve_nf=true
+    sites = siteinds("Electron", 2*N; conserve_qns=true)
     return sites
 end
 
@@ -219,12 +219,12 @@ function create_SO(sites, i_st, i_end, N, odd_even::String) #observe the string 
     return SO_head, SO_body, SO_tail
 end
 
-function measure(SO_head, SO_body, SO_tail, psi; cutoff=1e-10) # apply the operator to MPS to get the expectation
-    psi_after = apply(SO_head, psi)
+function measure(SO_head, SO_body, SO_tail, psi; cutoff=1e-10, maxdim=typemax(Int)) # apply the operator to MPS to get the expectation
+    psi_after = apply(SO_head, psi; cutoff=cutoff, maxdim=maxdim)
     for single_Rz in SO_body
-        psi_after = apply(single_Rz, psi_after)
+        psi_after = apply(single_Rz, psi_after; cutoff=cutoff, maxdim=maxdim)
     end
-    psi_after = apply(SO_tail, psi_after; cutoff=cutoff)
+    psi_after = apply(SO_tail, psi_after; cutoff=cutoff, maxdim=maxdim)
     C_value = -inner(psi, psi_after)
     SO_value = real(C_value)
     return C_value, SO_value

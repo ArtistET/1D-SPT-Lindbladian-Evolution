@@ -1,474 +1,513 @@
 using ITensors, ITensorMPS
 using LinearAlgebra
+using Statistics
+using Random
 using JLD2
 using ArgParse
 import Base.Filesystem.mkpath
 
 include("AKLT_GS.jl")
 
-# explanation for the model ------------can also see in FIG.1 of http://arxiv.org/abs/cond-mat/0609051v2  ---
-#        t1
-#      o---o---o---o  alpha=1
-#      |  /|  /|  /|
-#   tR | / | / | / |   
-#      |/tD|/  |/  |
-#      o---o---o---o  alpha=2
-#        t2
-#------------------------------------------------------------------------------------------------------------
+struct JumpChannel
+    target::Int
+    source::Int
+    create_op::String
+    destroy_op::String
+    number_op::String
+    rate::Float64
+    label::String
+end
+
 function parse_commandline()
     s = ArgParseSettings()
-
     @add_arg_table s begin
         "--load"
-            help = "load init ground state or not"
+            help = "load initial ground state or not"
             default = true
             arg_type = Bool
         "--loadsl"
-            help = "load a evolution slice or not"
+            help = "resume trajectory checkpoints or not"
             default = false
             arg_type = Bool
         "--loadt"
-            help = "the t of the slice loaded"
+            help = "time of the trajectory checkpoints loaded"
             default = 0.0
             arg_type = Float64
         "-N"
-            help = "Half of the system size, which is the size of one branch of the ladder, N is recommanded to be even"
+            help = "half of the system size"
+            required = true
             arg_type = Int
         "--Dmax"
-            help = "The maximum bond dimension"
+            help = "maximum MPS bond dimension during trajectory evolution"
             default = 400
             arg_type = Int
         "--Dstep"
-            help = "The step of increasing maxdim in DMRG"
+            help = "step of increasing maxdim in DMRG"
             default = 20
             arg_type = Int
         "--t1"
-            help = "The in-ladder1 hopping t1"
+            help = "in-leg hopping t1"
             default = 0.1
             arg_type = Float64
         "--t2"
-            help = "The in-ladder2 hopping t2"
+            help = "in-leg hopping t2"
             default = 0.2
             arg_type = Float64
         "--tR"
-            help = "The in-site hopping tR"
-            default = 1
+            help = "rung hopping tR"
+            default = 1.0
             arg_type = Float64
         "--tD"
-            help = "The diagonal hopping tD"
+            help = "diagonal hopping tD"
+            required = true
             arg_type = Float64
         "-J"
-            help = "The coupling J"
-            default = 0
+            help = "spin coupling J"
+            default = 0.0
             arg_type = Float64
         "--I1"
-            help = "The intensity of in-ladder1 hopping operators"
+            help = "intensity of in-leg1 jump operators"
             default = 0.1
             arg_type = Float64
         "--I2"
-            help = "The intensity of in-ladder2 hopping operators"
+            help = "intensity of in-leg2 jump operators"
             default = 0.1
             arg_type = Float64
         "--IR"
-            help = "The intensity of in-site hopping operators"
+            help = "intensity of rung jump operators"
             default = 0.1
             arg_type = Float64
         "--ID"
-            help = "The intensity of diagonal hopping operators"
+            help = "intensity of diagonal jump operators"
             default = 0.1
             arg_type = Float64
         "--initD"
-            help = "The initial bond dimension"
+            help = "initial DMRG bond dimension"
             default = 10
             arg_type = Int
         "--Dload"
-            help = "The maximum bond dimension loaded"
+            help = "bond dimension of loaded ground state or trajectory checkpoint"
             default = 100
             arg_type = Int
         "--Dstepload"
-            help = "The Dstep loaded"
+            help = "Dstep of loaded ground state"
             default = 20
             arg_type = Int
         "-U"
-            help = "The repulsive interaction relative to t"
+            help = "repulsive interaction"
+            required = true
             arg_type = Float64
         "--dt"
-            help = "The step of time"
-            default  = 0.01
+            help = "time step"
+            default = 0.01
             arg_type = Float64
         "--tsmax"
-            help = "The maximum step number of t"
-            default  = 20
+            help = "number of time steps"
+            default = 20
             arg_type = Int
-        # "-f"
-        #     help = "The filling of electron"
-        #     arg_type = Float64
+        "--ntraj"
+            help = "number of trajectories handled sequentially by this process"
+            default = 1
+            arg_type = Int
+        "--traj-start"
+            help = "global id of the first trajectory"
+            default = 1
+            arg_type = Int
+        "--seed"
+            help = "base random seed"
+            default = 1234
+            arg_type = Int
+        "--cutoff"
+            help = "MPS truncation cutoff"
+            default = 1e-8
+            arg_type = Float64
+        "--save-traj"
+            help = "save final MPS of every trajectory for continuation"
+            default = false
+            arg_type = Bool
     end
-
     return parse_args(s)
 end
 
-function load_slice(slice_path, t)
-    println("Load from time slice where t= ", t)
-    @load slice_path rho0
-    return rho0
+function format_hms(sec)
+    ms = round(Int, (sec - floor(sec)) * 1000)
+    isec = floor(Int, sec)
+    h = div(isec, 3600)
+    m = div(isec % 3600, 60)
+    s = isec % 60
+    return string(lpad(h, 2, '0'), ":", lpad(m, 2, '0'), ":", lpad(s, 2, '0'), ".", lpad(ms, 3, '0'))
 end
 
-function save_slice(rho0, slice_path)
-    @save slice_path rho0
-end
+time_label(t) = string(round(t; digits=12))
 
-function generate_slice_path(t, N, t1, t2, tR, tD, J, U, I1, I2, IR, ID, Dmax)
-    if !isdir("./psi_evolution/T$(t)_N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)_I1$(I1)_I2$(I2)_IR$(IR)_ID$(ID)/Dmax$(Dmax)")
-         mkpath("./psi_evolution/T$(t)_N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)_I1$(I1)_I2$(I2)_IR$(IR)_ID$(ID)/Dmax$(Dmax)")
+function add_bond_channels!(channels, a, b, rate, label)
+    for (spin, create_op, destroy_op, number_op) in
+        (("up", "Cdagup", "Cup", "Nup"), ("dn", "Cdagdn", "Cdn", "Ndn"))
+        push!(channels, JumpChannel(a, b, create_op, destroy_op, number_op, rate, "$(label)_$(spin)_$(b)to$(a)"))
+        push!(channels, JumpChannel(b, a, create_op, destroy_op, number_op, rate, "$(label)_$(spin)_$(a)to$(b)"))
     end
-    mps_path="./psi_evolution/T$(t)_N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)_I1$(I1)_I2$(I2)_IR$(IR)_ID$(ID)/Dmax$(Dmax)/AKLT_T$(t)__N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)_I1$(I1)_I2$(I2)_IR$(IR)_ID$(ID)_Dmax$(Dmax).jld2"
-    return mps_path
+    return channels
 end
 
-# function create_rho0_for_evolution(N::Int, load::Bool, loadsl, loadt, HS, mps_path, slice_path, psi0, initD, Dstep, Dmax)
-#     if load
-#         if loadsl
-#             rho0    = load_slice(slice_path, loadt)
-#         else
-#             rho0    = outer(psi0', psi0;maxdim=Dmax, cutoff=1e-6)
-#         end
-#     else
-#         energy, psi = dmrg_GS(N, HS, mps_path, psi0, initD, Dstep, Dmax)
-#         rho0        = outer(psi', psi;maxdim=Dmax, cutoff=1e-6)
-#     end
-#     return rho0
-# end
-
-function SO_MPO(sites,SO_head,SO_body,SO_tail;cutoff=1e-8,maxdim=400)
-    so_mpo = MPO(sites,"Id")
-    so_mpo = apply(SO_head, so_mpo;cutoff=cutoff,maxdim=maxdim)
-    for local_rot in SO_body
-        so_mpo = apply(local_rot, so_mpo;cutoff=cutoff,maxdim=maxdim)
+function create_jump_channels(N, I1, I2, IR, ID)
+    channels = JumpChannel[]
+    intensities = (I1, I2)
+    for j in 1:N
+        next_j = j % N + 1
+        for alpha in 1:2
+            add_bond_channels!(channels, lpos(j, alpha), lpos(next_j, alpha), intensities[alpha], "leg$(alpha)_$(j)")
+        end
+        add_bond_channels!(channels, lpos(j, 1), lpos(j, 2), IR, "rung_$(j)")
+        add_bond_channels!(channels, lpos(j, 2), lpos(next_j, 1), ID, "diag_$(j)")
     end
-    so_mpo = apply(SO_tail, so_mpo;cutoff=cutoff,maxdim=maxdim)
+    @assert length(channels) == 16N
+    return channels
+end
+
+function create_nojump_operator(sites, hamiltonian, dt, channels)
+    # Construct K0 as one OpSum. Adding already-built MPOs triggers an expensive
+    # generic MPO decomposition, and the paired directions obey exactly
+    # L†_ab L_ab + L†_ba L_ba = rate²*(n_a+n_b-2*n_a*n_b).
+    os = (-1im * dt) * hamiltonian + (1.0, "Id", 1)
+    @assert length(channels) % 4 == 0
+    for first_channel in 1:4:length(channels)
+        up_forward, up_reverse, dn_forward, dn_reverse = channels[first_channel:(first_channel + 3)]
+        a, b = up_forward.target, up_forward.source
+        @assert (up_reverse.target, up_reverse.source) == (b, a)
+        @assert (dn_forward.target, dn_forward.source) == (a, b)
+        @assert (dn_reverse.target, dn_reverse.source) == (b, a)
+        @assert up_forward.number_op == up_reverse.number_op == "Nup"
+        @assert dn_forward.number_op == dn_reverse.number_op == "Ndn"
+        @assert all(channel.rate == up_forward.rate for channel in (up_reverse, dn_forward, dn_reverse))
+        for spin_offset in (0, 2)
+            channel = channels[first_channel + spin_offset]
+            coefficient = dt * channel.rate^2
+            os += -0.5 * coefficient, channel.number_op, a
+            os += -0.5 * coefficient, channel.number_op, b
+            os += coefficient, channel.number_op, a, channel.number_op, b
+        end
+    end
+    return MPO(os, sites)
+end
+
+function create_jump_operator(sites, dt, channel)
+    os = OpSum()
+    os += sqrt(dt) * channel.rate,
+        channel.create_op, channel.target,
+        channel.destroy_op, channel.source
+    return MPO(os, sites)
+end
+
+function jump_probabilities(psi, dt, channels; negative_tolerance=1e-9)
+    # For L = rate*c†_target*c_source,
+    # ‖sqrt(dt)Lψ‖² = dt*rate²*<n_source*(1-n_target)>.
+    # Two density correlation matrices therefore replace 16N MPO applications.
+    correlations = Dict(
+        "Nup" => correlation_matrix(psi, "Nup", "Nup"),
+        "Ndn" => correlation_matrix(psi, "Ndn", "Ndn"),
+    )
+    probabilities = Vector{Float64}(undef, length(channels))
+    most_negative = 0.0
+    for (i, channel) in pairs(channels)
+        corr = correlations[channel.number_op]
+        occupation = real(corr[channel.source, channel.source])
+        joint_occupation = real(corr[channel.source, channel.target])
+        probability = dt * channel.rate^2 * (occupation - joint_occupation)
+        most_negative = min(most_negative, probability)
+        probabilities[i] = max(probability, 0.0)
+    end
+    most_negative < -negative_tolerance && @warn "Negative jump probability before clipping" most_negative
+    return probabilities
+end
+
+function trajectory_step(psi, rng, K0, channels, sites, dt; cutoff, maxdim)
+    jump_weights = jump_probabilities(psi, dt, channels)
+    total_jump_probability = sum(jump_weights)
+    isfinite(total_jump_probability) && total_jump_probability >= 0 ||
+        error("Invalid total jump probability: $total_jump_probability")
+    total_jump_probability <= 1 ||
+        error("Total jump probability is $total_jump_probability > 1; reduce dt")
+
+    draw = rand(rng)
+    if draw >= total_jump_probability
+        nojump_state = apply(K0, psi; cutoff=cutoff, maxdim=maxdim)
+        nojump_weight = real(inner(nojump_state, nojump_state))
+        nojump_weight > 0 || error("No-jump branch has zero norm")
+        normalize!(nojump_state)
+        return nojump_state, 0, total_jump_probability, nojump_weight
+    end
+
+    cumulative = 0.0
+    selected = 0
+    for i in eachindex(channels)
+        cumulative += jump_weights[i]
+        if draw < cumulative
+            selected = i
+            break
+        end
+    end
+    selected != 0 || error("Failed to select a jump channel: draw=$draw cumulative=$cumulative")
+
+    jump_state = apply(create_jump_operator(sites, dt, channels[selected]), psi; cutoff=cutoff, maxdim=maxdim)
+    actual_weight = real(inner(jump_state, jump_state))
+    actual_weight > 0 || error("Selected zero-norm jump channel $(channels[selected].label)")
+    if !isapprox(actual_weight, jump_weights[selected]; rtol=1e-5, atol=1e-12)
+        @warn "Selected jump weight changed by MPS truncation" channel=channels[selected].label predicted=jump_weights[selected] actual=actual_weight
+    end
+    normalize!(jump_state)
+    return jump_state, selected, total_jump_probability, actual_weight
+end
+
+function SO_MPO(sites, SO_head, SO_body, SO_tail; cutoff=1e-10, maxdim=400)
+    so_mpo = MPO(sites, "Id")
+    so_mpo = apply(SO_head, so_mpo; cutoff=cutoff, maxdim=maxdim)
+    so_mpo = apply(SO_body, so_mpo; cutoff=cutoff, maxdim=maxdim)
+    so_mpo = apply(SO_tail, so_mpo; cutoff=cutoff, maxdim=maxdim)
     return so_mpo
 end
 
-function measure_SO_for_rho(SO_head,SO_body,SO_tail,IN,rho_t)
-    rho_t_after = apply(SO_head, rho_t)
-    rho_t_after = apply(SO_body, rho_t_after)
-    rho_t_after = apply(SO_tail, rho_t_after)
-    C_value     = -inner(IN, rho_t_after)/inner(IN, rho_t)
-    SO_value    = real(C_value)
-    return C_value, SO_value
+function measure_string_orders(psi, SO_odd, SO_even)
+    C_odd = -inner(psi', SO_odd, psi)
+    C_even = -inner(psi', SO_even, psi)
+    return C_odd, C_even
 end
 
-function get_sites_rho0_HS(N::Int, t1, t2, tR, tD, J, U, load::Bool, loadsl::Bool, loadt, mps_path, load_path, slice_load_path, initD, Dstep, Dmax)
-    if load 
-        if loadsl
-            rho0    = load_slice(slice_load_path, loadt)
-            psi0    = nothing
-            sites   = firstsiteinds(rho0; plev=0)
-            os      = system_ham(N, t1, t2, tR, tD, J, U)
-            HS      = MPO(os, sites)
-        else
-            sites, psi0  = create_psi0_for_dmrg(N, load, load_path)
-            os           = system_ham(N, t1, t2, tR, tD, J, U)
-            HS           = MPO(os, sites)
-            rho0         = outer(psi0', psi0;maxdim=Dmax, cutoff=1e-6)
-        end
-    else
-        sites, psi00  = create_psi0_for_dmrg(N, load, load_path)
-        os            = system_ham(N, t1, t2, tR, tD, J, U)
-        HS            = MPO(os, sites)
-        energy, psi0  = dmrg_GS(N, HS, mps_path, psi00, initD, Dstep, Dmax)
-        rho0          = outer(psi0', psi0;maxdim=Dmax, cutoff=1e-6)
+function trajectory_base_path(N, t1, t2, tR, tD, J, U, I1, I2, IR, ID, Dmax, dt, seed)
+    return "./trajectory_evolution/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)_I1$(I1)_I2$(I2)_IR$(IR)_ID$(ID)/Dmax$(Dmax)_dt$(dt)_seed$(seed)"
+end
+
+function checkpoint_path(t, trajectory_id, N, t1, t2, tR, tD, J, U, I1, I2, IR, ID, Dmax, dt, seed; create=false)
+    base = trajectory_base_path(N, t1, t2, tR, tD, J, U, I1, I2, IR, ID, Dmax, dt, seed)
+    directory = joinpath(base, "checkpoints", "T$(time_label(t))")
+    create && mkpath(directory)
+    return joinpath(directory, "trajectory_$(trajectory_id).jld2")
+end
+
+function result_path(init_t, final_t, traj_start, traj_stop, N, t1, t2, tR, tD, J, U, I1, I2, IR, ID, Dmax, dt, seed)
+    base = trajectory_base_path(N, t1, t2, tR, tD, J, U, I1, I2, IR, ID, Dmax, dt, seed)
+    directory = joinpath(base, "results")
+    mkpath(directory)
+    return joinpath(directory, "T$(time_label(init_t))_to_T$(time_label(final_t))_traj$(traj_start)-$(traj_stop).jld2")
+end
+
+function save_trajectory(psi, path)
+    @save path psi
+end
+
+function load_trajectory(path)
+    isfile(path) || error("Trajectory checkpoint does not exist: $path")
+    @load path psi
+    return psi
+end
+
+function trajectory_rng(seed, trajectory_id, completed_steps)
+    rng = MersenneTwister(seed + trajectory_id - 1)
+    for _ in 1:completed_steps
+        rand(rng)
     end
-    return sites,psi0 , rho0, HS
+    return rng
 end
 
-function create_hopping(sites, HS, dt,N::Int64, I1::Float64, I2::Float64, IR::Float64, ID::Float64) #hopping operators for Lindblad
-    I         = [I1, I2]
-    IN        = MPO(sites,"Id")
-    sdt       = sqrt(dt)
-    K_list    = MPO[]
-    Kdag_list = MPO[]
-    os = OpSum()
-    for j=1:N
-        for alpha = 1:2
-            idx   = lpos(j,alpha)
-            idx_a = lpos(j%N+1,alpha)        #next idx in the same ladder (a for same "alpha")
-            #in-ladder terms
-            os += I[alpha]^2, "Cdagup", idx_a, "Cup" ,idx, "Cdagup", idx, "Cup" ,idx_a
-            os += I[alpha]^2, "Cdagup", idx, "Cup" ,idx_a, "Cdagup", idx_a, "Cup" ,idx
-            os += I[alpha]^2, "Cdagdn", idx_a, "Cdn" ,idx, "Cdagdn", idx, "Cdn" ,idx_a
-            os += I[alpha]^2, "Cdagdn", idx, "Cdn" ,idx_a, "Cdagdn", idx_a, "Cdn" ,idx
-        end
-        idx1 = lpos(j,1)
-        idx2 = lpos(j,2)
-        idxr = lpos(j%N+1,1)
-        #inter-ladder terms
-        os += IR^2, "Cdagup", idx2, "Cup", idx1, "Cdagup", idx1, "Cup", idx2
-        os += IR^2, "Cdagup", idx1, "Cup", idx2, "Cdagup", idx2, "Cup", idx1
-        os += IR^2, "Cdagdn", idx2, "Cdn", idx1, "Cdagdn", idx1, "Cdn", idx2
-        os += IR^2, "Cdagdn", idx1, "Cdn", idx2, "Cdagdn", idx2, "Cdn", idx1
-        os += ID^2, "Cdagup", idx2, "Cup", idxr, "Cdagup", idxr, "Cup", idx2
-        os += ID^2, "Cdagup", idxr, "Cup", idx2, "Cdagup", idx2, "Cup", idxr
-        os += ID^2, "Cdagdn", idx2, "Cdn", idxr, "Cdagdn", idxr, "Cdn", idx2
-        os += ID^2, "Cdagdn", idxr, "Cdn", idx2, "Cdagdn", idx2, "Cdn", idxr
-    end
-    Lsum = MPO(os, sites)
-    K0=IN+dt*(-1im*HS-0.5*Lsum)
-    K0_dag=IN+dt*(1im*HS-0.5*Lsum)
-    for j=1:N
-        for alpha = 1:2
-            idx   = lpos(j,alpha)
-            idx_a = lpos(j%N+1,alpha)        #next idx in the same ladder (a for same "alpha")
-            idx_d = (idx-3+2*alpha)%(2*N)    #next idx for tD (excepte for site(1,1)) 
-            idx_r = idx+3-2*alpha            #next idx for tR
-            #in-ladder terms
-            oh =  OpSum()
-            oh += sdt*I[alpha], "Cdagup", idx, "Cup" ,idx_a
-            push!(K_list,MPO(oh,sites))
-            
-            ohd =  OpSum()
-            ohd += sdt*I[alpha], "Cdagup", idx_a, "Cup" ,idx
-            push!(Kdag_list,MPO(ohd,sites))
-
-            oh =  OpSum()
-            oh += sdt*I[alpha], "Cdagup", idx_a, "Cup" ,idx
-            push!(K_list,MPO(oh,sites))
-
-            ohd =  OpSum()
-            ohd += sdt*I[alpha], "Cdagup", idx, "Cup" ,idx_a
-            push!(Kdag_list,MPO(ohd,sites))
-
-            oh =  OpSum()
-            oh += sdt*I[alpha], "Cdagdn", idx, "Cdn" ,idx_a
-            push!(K_list,MPO(oh,sites))
-
-            ohd =  OpSum()
-            ohd += sdt*I[alpha], "Cdagdn", idx_a, "Cdn" ,idx
-            push!(Kdag_list,MPO(ohd,sites))
-
-            oh =  OpSum()
-            oh += sdt*I[alpha], "Cdagdn", idx_a, "Cdn" ,idx
-            push!(K_list,MPO(oh,sites))
-
-            ohd =  OpSum()
-            ohd += sdt*I[alpha], "Cdagdn", idx, "Cdn" ,idx_a
-            push!(Kdag_list,MPO(ohd,sites))
-
-            #inter-ladder terms
-            oh =  OpSum()
-            oh += sdt*IR, "Cdagup", idx, "Cup", idx_r
-            push!(K_list,MPO(oh,sites))
-            oh =  OpSum()
-            oh += sdt*IR, "Cdagdn", idx, "Cdn", idx_r
-            push!(K_list,MPO(oh,sites))
-
-            ohd =  OpSum()
-            ohd += sdt*IR, "Cdagup", idx_r, "Cup", idx
-            push!(Kdag_list,MPO(ohd,sites))
-            ohd =  OpSum()
-            ohd += sdt*IR, "Cdagdn", idx_r, "Cdn", idx
-            push!(Kdag_list,MPO(ohd,sites))
-
-            if idx ==1
-                oh =  OpSum()
-                oh += sdt*ID, "Cdagup", 1, "Cup", 2*N
-                push!(K_list,MPO(oh,sites))
-                oh =  OpSum()
-                oh += sdt*ID, "Cdagdn", 1, "Cdn", 2*N
-                push!(K_list,MPO(oh,sites))
-
-                ohd =  OpSum()
-                ohd += sdt*ID, "Cdagup", 2*N, "Cup", 1
-                push!(Kdag_list,MPO(ohd,sites))
-                ohd =  OpSum()
-                ohd += sdt*ID, "Cdagdn", 2*N, "Cdn", 1
-                push!(Kdag_list,MPO(ohd,sites))
-
-            else
-                oh =  OpSum()
-                oh += sdt*ID, "Cdagup", idx, "Cup", idx_d
-                push!(K_list,MPO(oh,sites))
-                oh =  OpSum()
-                oh += sdt*ID, "Cdagdn", idx, "Cdn", idx_d
-                push!(K_list,MPO(oh,sites))
-
-                ohd =  OpSum()
-                ohd += sdt*ID, "Cdagup", idx_d, "Cup", idx
-                push!(Kdag_list,MPO(ohd,sites))
-                ohd =  OpSum()
-                ohd += sdt*ID, "Cdagdn", idx_d, "Cdn", idx
-                push!(Kdag_list,MPO(ohd,sites))
-            end
-        end
-    end
-    
-    return K0,K0_dag,K_list,Kdag_list
-end
-function format_hms(sec) # format a duration (in seconds) as HH:MM:SS.mmm
-    ms   = round(Int, (sec - floor(sec)) * 1000)
-    isec = floor(Int, sec)
-    h    = div(isec, 3600)
-    m    = div(isec % 3600, 60)
-    s    = isec % 60
-    return string(lpad(h,2,'0'), ":", lpad(m,2,'0'), ":", lpad(s,2,'0'), ".", lpad(ms,3,'0'))
-end
-function tree_sum(terms::Vector{MPO};cutoff=1e-8,maxdim=400)
-    current = copy(terms)
-    while length(current) >1
-        next = MPO[]
-        i=1
-        while i< length(current)
-            tmp = current[i]+current[i+1]
-            tbefore = time() #for testing 
-            truncate!(tmp;cutoff=cutoff,maxdim=maxdim)
-            push!(next,tmp)
-            println("One sum step over ,time cost=", format_hms(time()-tbefore)," (hh:mm:ss)") #for testing 
-            i +=2
-        end
-        if isodd(length(current))
-            push!(next,current[length(current)])
-        end
-        current = next
-    end
-    println("Tree sum over") #for testing 
-    return current[1]
-end
-function single_op_Lindblad(A,rho,Adag;cutoff=1e-8,maxdim=400)
-    # tmp = apply(rho,Adag)
-    # println("maxdim in contraction = ", maxlinkdim(tmp))
-    # rho1 = apply(A,tmp;cutoff=cutoff,maxdim=maxdim)
-    # rho1 = apply(A,apply(rho,Adag);cutoff=cutoff,maxdim=maxdim)  # more precise
-    rho1 = apply(A,apply(rho,Adag;cutoff=cutoff,maxdim=maxdim);cutoff=cutoff,maxdim=maxdim)  # more available
-    return rho1
-end
-function check_maxdim(K0,K_list)
-    maxdim_list=[]
-    push!(maxdim_list, maxlinkdim(K0))
-    for Ki in K_list
-        push!(maxdim_list, maxlinkdim(Ki))
-    end
-    println("bond dimensions for operators are ", maxdim_list," with total operator number =", length(maxdim_list))
-    return 0
-end
-function single_step_Lindblad(rho,K0,K0_dag,K_list::Vector{MPO},Kdag_list::Vector{MPO};block_size=4,cutoff=1e-8,maxdim=400)
-    buffer   = MPO[]
-    rho_list = MPO[]
-    rho_0    = single_op_Lindblad(K0,rho,K0_dag;cutoff=cutoff,maxdim=maxdim)
-    println("K0 applied, progress 1/", 1+length(K_list))  #for tesing 
-    push!(buffer, rho_0)
-    for i = 1:length(K_list)
-        t_st = time()
-        rho_i = single_op_Lindblad(K_list[i],rho,Kdag_list[i];cutoff=cutoff,maxdim=maxdim)
-        push!(buffer,rho_i)
-        if length(buffer)== block_size || i==length(K_list)
-            rho_sum = tree_sum(buffer;cutoff=cutoff,maxdim=maxdim)
-            push!(rho_list,rho_sum)
-            empty!(buffer)
-        end
-        println("K",i," applied, progress ", i+1,"/", 1+length(K_list),"step cost",format_hms(time()-t_st), " (hh:mm:ss)") #for testing
-    end
-    rho_ans = tree_sum(rho_list;cutoff=cutoff,maxdim=maxdim)
-    return rho_ans
-end
-function Lindblad_evolution(dt,tsmax,init_t, N, t1, t2, tR, tD, J, U, I1, I2, IR, ID, Dmax,rho,K0,K0_dag,K_list,Kdag_list,SO_h_odd, SO_b_odd, SO_t_odd,SO_h_even, SO_b_even, SO_t_even,IN;block_size=4,cutoff=1e-8)
-    for i = 1:tsmax
-        slice_path_t = generate_slice_path(init_t+dt*(i-1), N, t1, t2, tR, tD, J, U, I1, I2, IR, ID, Dmax)
-        save_slice(rho, slice_path_t)
-        C_odd, SOV_odd = measure_SO_for_rho(SO_h_odd, SO_b_odd, SO_t_odd,IN,rho)
-        C_even, SOV_even = measure_SO_for_rho(SO_h_even, SO_b_even, SO_t_even,IN,rho)
-        println("At T = ", init_t+dt*(i-1),"="^30)
-        println("complex SO_odd= ", C_odd, "  SO_odd= ", SOV_odd)
-        println("complex SO_even= ", C_even, "  SO_even= ", SOV_even)
-        t_step = time()
-        rho = single_step_Lindblad(rho,K0,K0_dag,K_list,Kdag_list;block_size=block_size,cutoff=cutoff,maxdim=Dmax)
-        println("Step ", i, "/", tsmax, " (T ", round(init_t+dt*(i-1), digits=6), " -> ", round(init_t+dt*i, digits=6), ") took ", format_hms(time()-t_step), " (hh:mm:ss) , maxlinkdim(rho)= ", maxlinkdim(rho))
-    end
-    slice_path_t = generate_slice_path(init_t+dt*tsmax, N, t1, t2, tR, tD, J, U, I1, I2, IR, ID, Dmax)
-    save_slice(rho, slice_path_t)
-    C_odd, SOV_odd = measure_SO_for_rho(SO_h_odd, SO_b_odd, SO_t_odd,IN,rho)
-    C_even, SOV_even = measure_SO_for_rho(SO_h_even, SO_b_even, SO_t_even,IN,rho)
-    println("At T_final = ", init_t+dt*tsmax,"="^30)
-    println("complex SO_odd= ", C_odd, "  SO_odd= ", SOV_odd)
-    println("complex SO_even= ", C_even, "  SO_even= ", SOV_even)
+function validate_args(args)
+    args["N"] >= 4 || error("N must be at least 4 for the present string-order interval")
+    args["Dmax"] > 0 || error("Dmax must be positive")
+    args["dt"] > 0 || error("dt must be positive")
+    args["tsmax"] >= 0 || error("tsmax must be nonnegative")
+    args["ntraj"] > 0 || error("ntraj must be positive")
+    args["traj-start"] > 0 || error("traj-start must be positive")
+    args["cutoff"] >= 0 || error("cutoff must be nonnegative")
+    args["loadsl"] && !args["load"] && error("loadsl=true requires load=true")
     return nothing
 end
 
-function test_tr_rho(SO_mpo,IN,rho)
-    rho_after= apply(SO_mpo,rho)
-    ans = -inner(IN,rho_after)/inner(IN, rho)
-    return ans
+function prepare_system(args)
+    N = args["N"]
+    load = args["load"]
+    loadsl = args["loadsl"]
+    loadt = args["loadt"]
+    Dmax = args["Dmax"]
+    Dstep = args["Dstep"]
+    Dload = args["Dload"]
+    Dstepload = args["Dstepload"]
+    t1, t2, tR, tD = args["t1"], args["t2"], args["tR"], args["tD"]
+    J, U = args["J"], args["U"]
+
+    mps_path = generate_mps_path(N, t1, t2, tR, tD, J, U, Dmax, Dstep)
+    load_path = generate_mps_path(N, t1, t2, tR, tD, J, U, Dload, Dstepload)
+
+    if loadsl
+        trajectory_id = args["traj-start"]
+        path = checkpoint_path(loadt, trajectory_id, N, t1, t2, tR, tD, J, U,
+            args["I1"], args["I2"], args["IR"], args["ID"], Dload, args["dt"], args["seed"])
+        psi_initial = load_trajectory(path)
+        sites = siteinds(psi_initial)
+    else
+        sites, psi_initial = create_psi0_for_dmrg(N, load, load_path)
+    end
+
+    HS = MPO(system_ham(N, t1, t2, tR, tD, J, U), sites)
+    if !load
+        _, psi_initial = dmrg_GS(N, HS, mps_path, psi_initial, args["initD"], Dstep, Dmax)
+    end
+    normalize!(psi_initial)
+    if load && !hasqns(first(siteinds(psi_initial)))
+        @warn "The loaded state has no QN blocks. Rerun with load=false to obtain the memory benefit of conserve_qns=true."
+    end
+    return sites, psi_initial, HS
+end
+
+function save_results(path, args, times, C_odd_samples, C_even_samples, jump_indices,
+    total_jump_probabilities, branch_weights, measurement_seconds, evolution_seconds,
+    checkpoint_seconds, completed_trajectories; final=false)
+    if final
+        SO_odd_mean = vec(mean(real.(C_odd_samples); dims=1))
+        SO_even_mean = vec(mean(real.(C_even_samples); dims=1))
+        if size(C_odd_samples, 1) > 1
+            SO_odd_stderr = vec(std(real.(C_odd_samples); dims=1, corrected=true)) ./ sqrt(size(C_odd_samples, 1))
+            SO_even_stderr = vec(std(real.(C_even_samples); dims=1, corrected=true)) ./ sqrt(size(C_even_samples, 1))
+        else
+            SO_odd_stderr = fill(NaN, length(times))
+            SO_even_stderr = fill(NaN, length(times))
+        end
+        @save path args times C_odd_samples C_even_samples SO_odd_mean SO_even_mean SO_odd_stderr SO_even_stderr jump_indices total_jump_probabilities branch_weights measurement_seconds evolution_seconds checkpoint_seconds completed_trajectories
+    else
+        @save path args times C_odd_samples C_even_samples jump_indices total_jump_probabilities branch_weights measurement_seconds evolution_seconds checkpoint_seconds completed_trajectories
+    end
+end
+
+function run_trajectories(args, sites, psi_initial, HS)
+    N = args["N"]
+    dt = args["dt"]
+    tsmax = args["tsmax"]
+    init_t = args["load"] && args["loadsl"] ? args["loadt"] : 0.0
+    final_t = init_t + dt * tsmax
+    Dmax = args["Dmax"]
+    cutoff = args["cutoff"]
+    ntraj = args["ntraj"]
+    traj_start = args["traj-start"]
+    traj_stop = traj_start + ntraj - 1
+    seed = args["seed"]
+    t1, t2, tR, tD = args["t1"], args["t2"], args["tR"], args["tD"]
+    J, U = args["J"], args["U"]
+    I1, I2, IR, ID = args["I1"], args["I2"], args["IR"], args["ID"]
+
+    idx_st = div(N, 4)
+    idx_ed = N - div(N, 4)
+    SO_h_odd, SO_b_odd, SO_t_odd = create_SO(sites, idx_st, idx_ed, N, "odd")
+    SO_h_even, SO_b_even, SO_t_even = create_SO(sites, idx_st, idx_ed, N, "even")
+    SO_odd = SO_MPO(sites, SO_h_odd, SO_b_odd, SO_t_odd; cutoff=cutoff, maxdim=Dmax)
+    SO_even = SO_MPO(sites, SO_h_even, SO_b_even, SO_t_even; cutoff=cutoff, maxdim=Dmax)
+
+    direct_odd, direct_even = measure_string_orders(psi_initial, SO_odd, SO_even)
+    apply_odd, _ = measure(SO_h_odd, SO_b_odd, SO_t_odd, psi_initial; cutoff=cutoff, maxdim=Dmax)
+    apply_even, _ = measure(SO_h_even, SO_b_even, SO_t_even, psi_initial; cutoff=cutoff, maxdim=Dmax)
+    println("Initial SO consistency: odd direct=", direct_odd, " apply=", apply_odd,
+        " |diff|=", abs(direct_odd - apply_odd))
+    println("Initial SO consistency: even direct=", direct_even, " apply=", apply_even,
+        " |diff|=", abs(direct_even - apply_even))
+    isapprox(direct_odd, apply_odd; rtol=1e-6, atol=1e-9) || error("Odd string-order constructions disagree")
+    isapprox(direct_even, apply_even; rtol=1e-6, atol=1e-9) || error("Even string-order constructions disagree")
+
+    channels = create_jump_channels(N, I1, I2, IR, ID)
+    K0 = create_nojump_operator(sites, system_ham(N, t1, t2, tR, tD, J, U), dt, channels)
+    println("Built ", length(channels), " jump channels as metadata; maxlinkdim(K0)=", maxlinkdim(K0))
+
+    times = collect(range(init_t; step=dt, length=tsmax + 1))
+    C_odd_samples = fill(ComplexF64(NaN, NaN), ntraj, tsmax + 1)
+    C_even_samples = fill(ComplexF64(NaN, NaN), ntraj, tsmax + 1)
+    jump_indices = zeros(Int, ntraj, tsmax)
+    total_jump_probabilities = fill(NaN, ntraj, tsmax)
+    branch_weights = fill(NaN, ntraj, tsmax)
+    measurement_seconds = zeros(ntraj, tsmax + 1)
+    evolution_seconds = zeros(ntraj, tsmax)
+    checkpoint_seconds = zeros(ntraj)
+    output_path = result_path(init_t, final_t, traj_start, traj_stop, N, t1, t2, tR, tD, J, U, I1, I2, IR, ID, Dmax, dt, seed)
+    completed_trajectories = 0
+
+    completed_steps = round(Int, init_t / dt)
+    isapprox(completed_steps * dt, init_t; rtol=0, atol=1e-10) || error("loadt must be an integer multiple of dt")
+
+    for local_id in 1:ntraj
+        trajectory_id = traj_start + local_id - 1
+        trajectory_wall = time()
+        if args["load"] && args["loadsl"]
+            if local_id == 1
+                psi = psi_initial
+                psi_initial = nothing
+            else
+                load_path = checkpoint_path(init_t, trajectory_id, N, t1, t2, tR, tD, J, U, I1, I2, IR, ID, args["Dload"], dt, seed)
+                psi = load_trajectory(load_path)
+                all(siteinds(psi) .== sites) || error("Site indices differ in trajectory checkpoint $load_path")
+                normalize!(psi)
+            end
+        else
+            psi = copy(psi_initial)
+        end
+        rng = trajectory_rng(seed, trajectory_id, completed_steps)
+        println("Trajectory ", trajectory_id, " started; maxlinkdim=", maxlinkdim(psi))
+
+        for time_index in 1:(tsmax + 1)
+            measurement_start = time()
+            C_odd_samples[local_id, time_index], C_even_samples[local_id, time_index] =
+                measure_string_orders(psi, SO_odd, SO_even)
+            measurement_seconds[local_id, time_index] = time() - measurement_start
+            println("Trajectory ", trajectory_id, " T=", time_label(times[time_index]),
+                " SO_odd=", real(C_odd_samples[local_id, time_index]),
+                " SO_even=", real(C_even_samples[local_id, time_index]),
+                " measurement=", format_hms(measurement_seconds[local_id, time_index]))
+
+            time_index > tsmax && break
+            evolution_start = time()
+            psi, jump_index, total_jump_probability, branch_weight = trajectory_step(
+                psi, rng, K0, channels, sites, dt; cutoff=cutoff, maxdim=Dmax)
+            evolution_seconds[local_id, time_index] = time() - evolution_start
+            jump_indices[local_id, time_index] = jump_index
+            total_jump_probabilities[local_id, time_index] = total_jump_probability
+            branch_weights[local_id, time_index] = branch_weight
+            event = jump_index == 0 ? "no jump" : channels[jump_index].label
+            println("Trajectory ", trajectory_id, " step ", time_index, "/", tsmax,
+                " event=", event, " jump_probability=", total_jump_probability,
+                " branch_norm=", branch_weight,
+                " maxlinkdim=", maxlinkdim(psi),
+                " evolution=", format_hms(evolution_seconds[local_id, time_index]))
+        end
+
+        if args["save-traj"]
+            checkpoint_start = time()
+            path = checkpoint_path(final_t, trajectory_id, N, t1, t2, tR, tD, J, U, I1, I2, IR, ID, Dmax, dt, seed; create=true)
+            save_trajectory(psi, path)
+            checkpoint_seconds[local_id] = time() - checkpoint_start
+            println("Trajectory ", trajectory_id, " checkpoint saved in ", format_hms(checkpoint_seconds[local_id]))
+        end
+        completed_trajectories = local_id
+        save_results(output_path, args, times, C_odd_samples, C_even_samples, jump_indices,
+            total_jump_probabilities, branch_weights, measurement_seconds, evolution_seconds,
+            checkpoint_seconds, completed_trajectories)
+        println("Trajectory ", trajectory_id, " finished in ", format_hms(time() - trajectory_wall))
+        GC.gc()
+    end
+
+    save_start = time()
+    save_results(output_path, args, times, C_odd_samples, C_even_samples, jump_indices,
+        total_jump_probabilities, branch_weights, measurement_seconds, evolution_seconds,
+        checkpoint_seconds, completed_trajectories; final=true)
+    println("Final ensemble result saved to ", output_path, " in ", format_hms(time() - save_start))
+    return output_path
 end
 
 function main()
     args = parse_commandline()
+    validate_args(args)
     @show args
-    load  = args["load"]
-    loadsl= args["loadsl"]
-    loadt = args["loadt"]
-    N     = args["N"]
-    Dmax  = args["Dmax"]
-    t1    = args["t1"]
-    t2    = args["t2"]
-    tR    = args["tR"]
-    tD    = args["tD"]
-    I1    = args["I1"]
-    I2    = args["I2"]
-    IR    = args["IR"]
-    ID    = args["ID"]
-    J     = args["J"]
-    initD = args["initD"]
-    Dstep = args["Dstep"]
-    Dload = args["Dload"]
-    Dstepload = args["Dstepload"]
-    U     = args["U"]
-    dt    = args["dt"]
-    tsmax = args["tsmax"]
-    init_t= 0.0
-    if load && loadsl     # if load time slice, init t will be adjusted to loadt, or else init t = 0
-        init_t = loadt
-    end
-    mps_path  = generate_mps_path(N, t1, t2, tR, tD, J, U, Dmax, Dstep)
-    load_path = generate_mps_path(N, t1, t2, tR, tD, J, U, Dload, Dstepload)
-    # slice_path= generate_slice_path(t, N, t1, t2, tR, tD, J, U, Dmax, Dstep)
-    slice_load_path= generate_slice_path(loadt, N, t1, t2, tR, tD, J, U, I1, I2, IR, ID, Dload)
-    # slice_path
-    # sites, psi0  = create_psi0_for_dmrg(N, load, load_path)
-    t_load = time()
-    sites, psi0 ,rho0, HS  = get_sites_rho0_HS(N, t1, t2, tR, tD, J, U,load,loadsl,loadt, mps_path,load_path,slice_load_path, initD, Dstep, Dmax)
-    # os       = system_ham(N, t1, t2, tR, tD, J, U)
-    # HS       = MPO(os, sites)
-    # rho0     = create_rho0_for_evolution(N, load, loadsl, loadt, HS, mps_path, slice_load_path, psi0, initD, Dstep, Dmax)
-    println("Initial density matrix loaded in ", format_hms(time()-t_load), " (hh:mm:ss)")
-    t_ops = time()
-    idx_st = div(N,4)
-    idx_ed = N-div(N,4)
-    SO_h_odd, SO_b_odd, SO_t_odd    = create_SO(sites, idx_st, idx_ed, N, "odd")
-    SO_h_even, SO_b_even, SO_t_even = create_SO(sites, idx_st, idx_ed, N, "even")
+    println("Julia threads=", Threads.nthreads(), " BLAS threads=", BLAS.get_num_threads())
 
-    # ===============testing===============================================
-    SO_mpo_odd                      = SO_MPO(sites, SO_h_odd, SO_b_odd, SO_t_odd; maxdim = Dmax)
-    SO_mpo_even                     = SO_MPO(sites, SO_h_even, SO_b_even, SO_t_even; maxdim = Dmax)
-    if psi0 !== nothing
-        SO_0_odd = -inner(psi0',SO_mpo_odd,psi0)
-        SO_0_even = -inner(psi0',SO_mpo_even,psi0)
-        println("Initial SO_odd = ", SO_0_odd, " SO_even= ", SO_0_even)
-    else
-        println("As we load time slice, no psi0 exists, therefore no testing for MPS method.")
-    end
-    IN = MPO(sites,"Id")
-    println("For density matrix method","="^30)
-    SO_1_odd = test_tr_rho(SO_mpo_odd,IN,rho0)
-    SO_1_even = test_tr_rho(SO_mpo_even,IN,rho0)
-    println("Initial SO_odd = ", SO_1_odd, " SO_even= ", SO_1_even)
-    # ======================================================================
-
-    K0,K0_dag,K_list,Kdag_list      = create_hopping(sites, HS, dt,N, I1, I2, IR, ID)
-    check_maxdim(K0,K_list)
-    println("SO / Lindblad operators built in ", format_hms(time()-t_ops), " (hh:mm:ss)")
-    Lindblad_evolution(dt,tsmax,init_t,N, t1, t2, tR, tD, J, U, I1, I2, IR, ID, Dmax,rho0,K0,K0_dag,K_list,Kdag_list,SO_h_odd, SO_b_odd, SO_t_odd,SO_h_even, SO_b_even, SO_t_even,IN)
+    load_start = time()
+    sites, psi_initial, HS = prepare_system(args)
+    println("Initial MPS/system prepared in ", format_hms(time() - load_start),
+        "; QN conserving=", hasqns(first(siteinds(psi_initial))), "; maxlinkdim=", maxlinkdim(psi_initial))
+    run_trajectories(args, sites, psi_initial, HS)
 end
 
-if abspath(PROGRAM_FILE) == @__FILE__ # only run this code when directly running, including will not trigger main()
+if abspath(PROGRAM_FILE) == @__FILE__
     main()
 end
