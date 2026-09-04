@@ -10,6 +10,6 @@ __pycache__/
 !batch_AKLT_evol_sub.sh
 *.md
 log/
-sbatch/
+sbatches/
 !QUANTUM_TRAJECTORY_ALGORITHM.md
 !README.md
