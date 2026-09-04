@@ -4,6 +4,7 @@ trajectory_evolution/*
 test.jl
 AIcode.jl
 .claude/*
+__pycache__/
 *.sh
 !sub_evol.sh
 !batch_AKLT_evol_sub.sh
