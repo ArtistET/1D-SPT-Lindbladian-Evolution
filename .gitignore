@@ -9,5 +9,6 @@ __pycache__/
 !sub_evol.sh
 !batch_AKLT_evol_sub.sh
 *.md
+!AGENTS.md
 !QUANTUM_TRAJECTORY_ALGORITHM.md
 !README.md
