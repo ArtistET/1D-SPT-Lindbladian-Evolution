@@ -72,7 +72,7 @@ $$
 
 注意代码参数 $I$ 是跳跃算符的振幅，所以耗散率中出现的是 $I^2$。
 
-## 3. 从 Lindblad 方程到离散 Kraus 形式
+## 3. 一阶 jump 抽样与离散 Kraus 形式
 
 在一阶时间步 $\Delta t$ 下定义
 
@@ -118,6 +118,8 @@ $$
 
 这就是 Lindblad 方程的一阶离散形式。
 
+这段推导仍用于确定每一步的 jump 概率，但当前程序不再把一阶 Euler 的 $K_0$ 作用到 MPS。no-jump 状态改由第 4.2–4.3 节的非厄米有效哈密顿量指数传播；因此当前方法是“一阶 jump 事件抽样 + TDVP no-jump 传播”的离散 MCWF。
+
 ## 4. 从 Kraus 分支到随机纯态演化
 
 假设当前状态为归一化纯态 $|\psi\rangle$。第 $\mu$ 个跳跃的概率为
@@ -157,7 +159,8 @@ $$
 
 $$
 |\psi_0'\rangle
-=\frac{K_0|\psi\rangle}{\|K_0|\psi\rangle\|},
+=\frac{e^{-iH_{\rm eff}\Delta t}|\psi\rangle}
+{\|e^{-iH_{\rm eff}\Delta t}|\psi\rangle\|},
 $$
 
 $$
@@ -167,54 +170,92 @@ $$
 
 对随机分支取系综平均，就在 $O(\Delta t)$ 精度上恢复 Lindblad 演化。
 
-### 4.1 为什么不直接把 $\|K_0\psi\|^2$ 当作抽样概率
+### 4.1 为什么仍用 $p_0=1-p_{\rm jump}$ 抽样
 
-形式上有
+有效哈密顿量的指数传播满足
 
 $$
-\|K_0\psi\|^2
+\|e^{-iH_{\rm eff}\Delta t}\psi\|^2
 =1-p_{\rm jump}+O(\Delta t^2).
 $$
 
-但 Euler 形式的 $K_0=1-iH\Delta t+\cdots$ 含有
-
-$$
-\Delta t^2\langle H^2\rangle.
-$$
-
-对广延哈密顿量，体系越大，$\langle H^2\rangle$ 越大。在本项目的 $N=10,D=100,\Delta t=0.01$ 基准中，直接计算的 Kraus 总范数约为 2.108，而不是接近 1。它主要是有限步长的 Hamiltonian Euler 误差，不能用来重新缩放物理跳跃率。
-
-因此代码直接用一阶正确的
+程序在每个离散时间步开头计算
 
 $$
 p_0=1-\sum_\mu p_\mu
 $$
 
-抽样，同时把实际分支范数保存为 `branch_weights`，作为时间步和截断误差诊断，而不是把它当概率。
+并且每步至多发生一次 jump。这是一阶 jump-time 离散；实际指数传播后的 no-jump 范数与 $p_0$ 只要求在 $O(\Delta t^2)$ 内一致。代码把实际范数保存为 `branch_weights`，并要求它与 $1-p_{\rm jump}$ 的绝对差不超过 `0.01`。该阈值是防止传播器明显失效的保护条件，不是时间步已经收敛的证明。
 
-### 4.2 为什么在 $K_0$ 中平移初态能量
+### 4.2 有效哈密顿量与能量平移
 
-连续时间演化允许给哈密顿量减去任意实常数：
-
-$$
-H\longrightarrow H-E_{\rm ref}I.
-$$
-
-它只给未归一化 no-jump 状态增加整体相位，归一化后的物理状态和所有观测量不变。但是一阶 Euler 近似并不精确保持这种等价性；广延的基态能量会使无物理意义的 $E_{\rm ref}^2\Delta t^2$ 项变大，并相对压低耗散修正。
-
-程序因此取
+把 Lindblad 方程写成
 
 $$
-E_{\rm ref}=\langle\psi(0)|H|\psi(0)\rangle
+\frac{d\rho}{dt}
+=-i\left(H_{\rm eff}\rho-\rho H_{\rm eff}^\dagger\right)
++\sum_\mu L_\mu\rho L_\mu^\dagger,
 $$
 
-并实际构造
+其中
 
 $$
-K_0=1-i\Delta t(H-E_{\rm ref}I)-\frac{\Delta t}{2}\sum_\mu L_\mu^\dagger L_\mu.
+H_{\rm eff}=H-\frac{i}{2}\sum_\mu L_\mu^\dagger L_\mu.
 $$
 
-这不替代时间步收敛检查，但对从基态出发的短时间演化可显著减小 Euler 误差。`energy_shift` 会写入运行日志；续算时它由所加载的第一条轨迹状态重新估计。
+第一项就是“已知本步没有发生 jump”时的非归一化条件演化。$H_{\rm eff}$ 的反厄米部分使态范数下降，该范数损失与 jump 总概率相对应。
+
+当前代码实际构造
+
+$$
+\widetilde H_{\rm eff}=H_{\rm eff}-E_{\rm shift}I,
+$$
+
+其中 $E_{\rm shift}$ 是实数，当前取本次运行所加载初态的能量期望值，并在该运行段中保持不变；代码变量 `H_eff` 实际保存的是这里的 $\widetilde H_{\rm eff}$。它只选择能量零点，因为
+
+$$
+e^{-i\widetilde H_{\rm eff}\Delta t}
+=e^{+iE_{\rm shift}\Delta t}e^{-iH_{\rm eff}\Delta t}.
+$$
+
+右侧多出的因子只是全局相位；态的范数、jump 概率、归一化后的观测量和密度矩阵 channel 都不变。从主方程看也有 $[H-E_{\rm shift}I,\rho]=[H,\rho]$。这个结论要求 $E_{\rm shift}$ 为实数且乘完整 Hilbert 空间上的恒等算符；复数平移或非恒等算符会改变物理。
+
+保留该平移的数值动机是把 Hamiltonian 的谱中心移近零，减少 Krylov 指数传播需要处理的无物理意义大相位。它不是 MCWF 正确性所必需；设为零应在 TDVP 容差内给出相同结果。
+
+早期代码对一阶 Euler 算符使用相同想法，但有限步长下
+
+$$
+1-i\Delta t(H_{\rm eff}-E_{\rm shift}I)
+$$
+
+并不等于全局相位乘以 $1-i\Delta tH_{\rm eff}$，两者从 $O(\Delta t^2)$ 开始不同。一次 jump 改变轨迹能量后，固定初态平移曾导致 no-jump 范数约为 `1.24`，而一阶期望约为 `0.98`；归一化不能修复这种状态方向误差。这正是生产算法从 Euler 改为指数 TDVP 的原因。
+
+### 4.3 两站点非厄米 TDVP
+
+程序使用 ITensor 的两站点 TDVP 近似
+
+$$
+|\widetilde\psi(t+\Delta t)\rangle
+=e^{-i\widetilde H_{\rm eff}\Delta t}|\psi(t)\rangle.
+$$
+
+调用的关键设置为：
+
+```julia
+nojump_state = tdvp(H_eff, -1im * dt, psi;
+    nsite=2, maxdim=maxdim, cutoff=cutoff, normalize=false,
+    updater_kwargs=(;
+        ishermitian=false, tol=1e-8,
+        krylovdim=15, maxiter=30, eager=true))
+```
+
+- `nsite=2` 允许 no-jump 演化增加 MPS 键维；单站点 TDVP 不能增加已有键空间；
+- `ishermitian=false` 是因为 $H_{\rm eff}$ 含反厄米耗散项；
+- `normalize=false` 保留未归一化范数，供生存概率诊断使用；
+- `maxdim` 和 `cutoff` 控制两站点分裂时的 MPS 截断；
+- Krylov 参数控制局域非厄米指数作用的精度。
+
+取得 `branch_weights` 后才对 no-jump 态归一化。TDVP 消除了旧 Euler 中由广延 Hamiltonian 能量造成的大型多项式截断误差，但不会消除有限 `dt` 的 jump-time 离散误差、MPS 截断误差或 TDVP/Krylov 投影误差，所以仍必须做跳跃后的时间步和键维收敛检查。
 
 ## 5. 本模型为什么有 $16N$ 个 channel
 
@@ -263,7 +304,7 @@ end
 
 `create_jump_channels` 调用 `add_bond_channels!`，为每条几何键生成四个 channel。
 
-## 6. $K_0$ 中 $\sum L_\mu^\dagger L_\mu$ 的严格化简
+## 6. $H_{\rm eff}$ 中 $\sum L_\mu^\dagger L_\mu$ 的严格化简
 
 对
 
@@ -295,34 +336,34 @@ $$
 I^2\left(n_a+n_b-2n_an_b\right).
 $$
 
-该等式只用于构造 $K_0$ 中本来就要求和的 $\sum L_\mu^\dagger L_\mu$。jump 分支中的两个方向仍然是独立随机事件。
+该等式只用于构造 $H_{\rm eff}$ 中本来就要求和的 $\sum L_\mu^\dagger L_\mu$。jump 分支中的两个方向仍然是独立随机事件。
 
-代码把 Hamiltonian、单位算符和化简后的耗散项一次性放进同一个 `OpSum`：
+代码把 Hamiltonian、固定的实数能量平移和化简后的耗散项一次性放进同一个 `OpSum`：
 
 ```julia
-os = (-1im * dt) * hamiltonian + (1.0, "Id", 1)
+os = hamiltonian + (-energy_shift, "Id", 1)
 
-os += -0.5 * coefficient, number_op, a
-os += -0.5 * coefficient, number_op, b
-os += coefficient, number_op, a, number_op, b
+os += -0.5im * coefficient, number_op, a
+os += -0.5im * coefficient, number_op, b
+os += 1im * coefficient, number_op, a, number_op, b
 ```
 
 最后只调用一次：
 
 ```julia
-K0 = MPO(os, sites)
+H_eff = MPO(os, sites)
 ```
 
-这避免了把已经构造好的多个 MPO 再做通用 MPO 加法和分解。曙光上的 $N=10$ 测试中，旧路径运行约 13 分 51 秒仍未构造完成；单 OpSum 路径约 25.8 秒完成。
+这避免了逐个构造 $L_\mu^\dagger L_\mu$ MPO，再做通用 MPO 加法和分解。`coefficient` 在这里是跳跃振幅的平方，不包含 `dt`；时间步由随后 `tdvp(H_eff, -1im * dt, ...)` 的传播时间给出。
 
-`create_nojump_operator` 依赖每条键的四个 channel 顺序，因此代码现在显式断言：
+`create_effective_hamiltonian` 依赖每条键的四个 channel 顺序，因此代码显式断言：
 
 - up 正反方向互换；
 - down 正反方向互换；
 - up/down 使用同一 target/source；
 - 四个 channel 强度相同。
 
-未来若修改 channel 排列，错误会立即暴露，而不会静默生成错误的 $K_0$。
+未来若修改 channel 排列，错误会立即暴露，而不会静默生成错误的 $H_{\rm eff}$。
 
 ## 7. 不逐个作用 jump MPO，直接计算全部概率
 
@@ -371,15 +412,16 @@ probability = dt * rate^2 * (occupation - joint_occupation)
 `trajectory_step` 的逻辑可写成：
 
 ```text
-输入：归一化 MPS ψ、K0、channel 元数据、随机数发生器
+输入：归一化 MPS ψ、H_eff、channel 元数据、随机数发生器
 
 1. 用 Nup/Ndn 关联矩阵计算所有 pμ
 2. pjump = sum(pμ)
 3. 检查 0 ≤ pjump ≤ 1
 4. 产生一个随机数 r
 5. 若 r ≥ pjump：
-       ψ ← K0 ψ
-       记录未归一化分支范数
+       ψ ← TDVP(H_eff, -i dt) ψ
+       记录未归一化 no-jump 范数
+       检查该范数与 1-pjump 的差不超过 0.01
        normalize!(ψ)
    否则：
        按累计概率选择唯一 channel μ
@@ -398,7 +440,13 @@ total_jump_probability = sum(jump_weights)
 draw = rand(rng)
 
 if draw >= total_jump_probability
-    nojump_state = apply(K0, psi; cutoff=cutoff, maxdim=maxdim)
+    nojump_state = tdvp(H_eff, -1im * dt, psi;
+        nsite=2, maxdim=maxdim, cutoff=cutoff, normalize=false,
+        updater_kwargs=(;
+            ishermitian=false, tol=1e-8,
+            krylovdim=15, maxiter=30, eager=true))
+    nojump_weight = real(inner(nojump_state, nojump_state))
+    abs(nojump_weight - (1 - total_jump_probability)) <= 0.01 || error(...)
     normalize!(nojump_state)
 else
     # 按累计 pμ 选择一个 channel
@@ -407,7 +455,7 @@ else
 end
 ```
 
-每一步恰好只调用一次 `rand(rng)`。断点续算的随机流恢复依赖这个约定。
+每一步恰好只调用一次 `rand(rng)`。断点续算的随机流恢复依赖这个约定。jump 分支仍在时间步起点按一阶概率选择，并且每步至多一次 jump；TDVP 只替换 no-jump 状态传播，不会把整个离散 MCWF 自动提升为高阶 jump 算法。
 
 ## 9. string-order observable 的测量
 
@@ -492,7 +540,7 @@ $$
 - 同一条轨迹在相邻时间的观测值当然相关，但这些点分别估计不同物理时刻，不要求彼此独立；
 - 只有将来试图用“一条很长的稳态轨迹的时间平均”代替轨迹系综平均时，才必须估计积分自相关时间，并据此选择采样间隔和有效样本数。
 
-本次收敛实验使用独立轨迹，并比较 $M=4,8,16,32$ 的嵌套样本均值和标准误差，不通过跳过时间点制造表面上的独立样本。
+收敛实验使用独立轨迹，并比较 $M=4,8,16,32,64,\ldots$ 的嵌套样本均值和标准误差，不通过跳过时间点制造表面上的独立样本。
 
 ## 11. 初始化、加载和 checkpoint
 
@@ -505,6 +553,7 @@ $$
 | `--seed` | 基础随机种子 |
 | `--cutoff` | MPS 截断阈值 |
 | `--save-traj` | 是否保存每条轨迹末态 MPS |
+| `--measure-every` | 每隔多少个演化步测量一次 SO；不改变实际演化步长 |
 
 三种初始化模式为：
 
@@ -569,7 +618,13 @@ $$
 
 ### 14.1 时间离散误差
 
-当前 no-jump 使用一阶 Euler $K_0$，单步误差为 $O(\Delta t^2)$，固定总时间下的全局误差通常为 $O(\Delta t)$。
+当前 no-jump 使用双站点非厄米 TDVP 近似指数传播，不再使用一阶 Euler $K_0$。时间离散误差主要有三部分：
+
+1. jump 概率在时间步起点按 $p_\mu=\Delta t\langle L_\mu^\dagger L_\mu\rangle$ 计算，并且每步至多发生一次 jump；
+2. TDVP 将非厄米演化投影到有限键维 MPS 流形；
+3. 局域 Krylov 指数作用和两站点分裂带来容差及截断误差。
+
+因此，指数 TDVP 消除了旧 Euler 的大型 Hamiltonian 多项式误差，但整个离散 MCWF 仍不是有限 `dt` 下的精确 Lindblad channel。`branch_weights` 检查只能发现明显异常，不能替代收敛测试。
 
 至少比较：
 
@@ -611,9 +666,9 @@ $$
 
 最终物理结论仍需对 $N\to\infty$ 外推，而不能由单个 $N$ 的轨迹结果决定。
 
-## 15. 与 `colab_plot.ipynb` 中基态拟合的关系
+## 15. 与历史 notebook 中基态拟合的关系
 
-notebook 的 “1D SPT project” 已包含以下工作：
+仓库当前保存的是 `plot.ipynb`，没有名为 `colab_plot.ipynb` 的文件；若本地或 Colab 中另有这个名字，它应是仓库 notebook 的外部副本。历史 notebook 的 “1D SPT project” 分析包含以下工作：
 
 - 对 $U=0,10,32,100,316,1000$ 绘制 odd/even SO 随 $t_R/t_D$ 的变化；
 - 使用过 $N=10,14,20,28,40$；
@@ -669,47 +724,98 @@ $$
 
 当前版本有意没有加入：
 
-- 自动合并不同 Slurm 作业产生的结果文件；
+- 连续时间 waiting-time MCWF；
+- 在单个离散步内抽取 jump 的精确发生时刻；
+- 自适应 `dt` 或自动 TDVP 局部误差控制；
 - 对演化结果自动执行 $\Delta\to0$ 和 $N\to\infty$ 拟合；
-- 用 TDVP 替代 Euler no-jump；
 - 在单个 Julia 进程中并行保存多条大 MPS。
 
-原因是这些功能不影响量子轨迹主算法的正确运行，而且应在第一批生产数据确认文件规模、轨迹方差和单步资源后再决定具体形式。
+当前选择是边界清楚的一阶 jump 抽样配合稳定的 TDVP no-jump 传播。更高阶或连续时间算法只有在现有 `dt` 收敛测试无法以合理成本达到目标误差时才需要加入。
 
 ## 17. 已完成的验证
 
-曙光计算节点上的 $N=4$ QN 回归测试覆盖：
+本地 $N=4$ QN 回归测试覆盖：
 
 - channel 总数；
 - 每个非零 jump channel 的解析概率与显式 MPO 范数；
-- 化简前后 $K_0$ 作用结果；
+- 化简后的 $H_{\rm eff}$ 与一阶展开的一致性；
 - 总跳跃概率和归一化；
 - 一步随机演化；
+- 显式跳跃后的 TDVP no-jump 生存范数；
+- 跳跃后固定总时间的 $\Delta t$ 与 $\Delta t/2$ 态重合；
 - 非零 SO 状态上的 MPS 直接测量、MPS apply、MPDO apply 和 MPO–MPO inner。
 
-最终结果为 74 项全部通过。
+最终结果为 76 项全部通过。
 
-还完成了 $N=10,D=100$ 的旧非 QN 基态基准：
+还完成了真实 $N=10,D=100$、非 QN 基态上的传播器检查：
 
-- 基态加载约 8.4 秒；
-- $K_0$ 构造约 25.8 秒；
-- 两张关联矩阵和全部 jump 概率约 83.2 秒；
-- 完整一步约 586.7 秒；
-- 峰值内存约 3.32 GB。
+- `dt=0.025` 的单站点和双站点 TDVP 单步分别约为 111 秒和 242 秒；
+- 两者的 no-jump 范数差约 $5\times10^{-6}$；
+- 双站点方案虽然更慢，但允许演化产生新的键维，因此用于生产计算；
+- 强制 jump 后比较 `dt=0.05,0.025,0.0125`，最大生存概率误差依次约为 $2.70\times10^{-4}$、$6.74\times10^{-5}$、$1.68\times10^{-5}$；
+- `dt=0.025` 与 `0.0125` 的最终 odd/even SO 差都约为 $1.8\times10^{-7}$，态 infidelity 约为 $1.8\times10^{-6}$。
 
-这些数字说明新算法已经大幅降低分支数量和固定构造成本，但不能替代 $N=28/40,D=400$ 的 QN 生产前试跑。
+这些结果支持当前 `dt=0.025` 的短时、跳跃后传播精度，但不能替代长时间、不同 `Dmax`、不同系统尺寸和轨迹样本数的独立收敛检查。
 
-## 18. 推荐的第一批生产检查
+## 18. 生产计算的验收顺序
 
-建议按以下顺序推进，而不是立即提交大量轨迹：
+正式结果按以下顺序验收：
 
-1. 重新生成一个较小尺寸的 QN 基态；
-2. 用 `ntraj=1, tsmax=1` 测单步时间和峰值内存；
-3. 用同一初态比较 $\Delta t$ 与 $\Delta t/2$；
-4. 用 $M=8$ 或 $16$ 估计两个 SO 的轨迹方差；
-5. 根据目标误差反推生产轨迹数；
-6. 再扩展到 $N=28/40$；
-7. 最后把演化数据接入 notebook 的 $\Delta\to0$、$N\to\infty$ 流程。
+1. 用强制发生 jump 的轨迹比较 $\Delta t,\Delta t/2,\Delta t/4$；
+2. 检查每步 `p_jump <= 1`、no-jump 范数、负概率、NaN 和日志完整性；
+3. 比较不同 `Dmax`、`cutoff`，并记录实际最大 MPS 键维；
+4. 逐级增加独立轨迹数，检查均值变化和标准误，而不只看误差棒外观；
+5. 确认目标时间上的 SO 或临界点附近斜率已与初态产生统计显著差异；
+6. 再扩展系统尺寸，并最终接入 $\Delta\to0$、$N\to\infty$ 分析。
+
+## 19. 当前算法与前两种实现的区别
+
+| 实现 | 保存的状态 | no-jump 传播 | 每步处理的分支 | 主要问题或代价 |
+|---|---|---|---:|---|
+| 旧 MPDO/Kraus | 密度矩阵 MPO | 一阶 Kraus | 全部 $1+16N$ 个分支并求和 | operator-space 键维和内存快速增长 |
+| 早期量子轨迹 | 纯态 MPS | 一阶 Euler $K_0$ | 随机选择一个分支 | 跳跃后固定能量平移可产生很大的有限步长状态误差 |
+| 当前量子轨迹 | 纯态 MPS | 双站点非厄米 TDVP 指数传播 | 随机选择一个分支 | 仍有一阶 jump-time 离散、TDVP/MPS 截断和统计误差 |
+
+三种实现目标都是同一个 Lindblad 方程。当前方案没有改变 $16N$ 个物理 jump channel，也没有把不同方向或自旋合并；它只改变了状态表示、每步选择分支的方式，以及 no-jump 条件态的数值传播器。相对于早期量子轨迹，最关键的改变是用
+
+$$
+e^{-iH_{\rm eff}\Delta t}|\psi\rangle
+$$
+
+替代一阶多项式 $K_0|\psi\rangle$。因此实数 $E_{\rm shift}I$ 恢复为严格的全局相位规范，而不再通过有限阶多项式影响状态方向。
+
+## 20. N=10、U=10、T=4 的生产结果
+
+传播器修复后完成了五个近临界参数点的长时间实验：
+
+```text
+tD = 0.98, 0.99, 1.0, 1.01, 1.02
+tR = 1
+dt = 0.025, tsmax = 160, T = 4
+measure_every = 4
+Dload = Dmax = 100
+seed = 260903
+M = 256 trajectories per tD
+```
+
+中心斜率从初态的 odd `-0.9565283970`、even `+0.9714583645`，演化到 `T=4` 的
+
+```text
+odd  = -0.4747839721 ± 0.0261204430
+even = +0.4952725948 ± 0.0277745704
+```
+
+相对初态的变化分别约为 `18.4` 和 `17.1` 个 `T=4` 标准误，已经满足“演化态与初始基态的中心斜率存在可见差异”的目标。`M=128 -> 256` 时，`T=4` 五点均值的最大变化为 odd `5.11e-4`、even `1.71e-4`；但若遍历所有记录时刻，最大变化仍为 odd `2.27e-3`、even `1.70e-3`，因此只能把 `M=256` 视为足够回答当前定性问题，不能宣称整条时间曲线严格统计收敛。
+
+所有轨迹记录的最大键维都是 `100`，且加载的历史初态本身就是非 QN、最大键维 `100` 的 MPS，所以仍不能排除 `Dmax` 截断误差。五个参数点在 `T=4` 的平均累计 jump 数为 `1.771875`。
+
+完整结果和说明位于：
+
+- `experiment_results/trajectory_N10_U10_T4_M256_tdvp2.csv`
+- `experiment_results/trajectory_N10_U10_T4_M256_tdvp2_slopes.csv`
+- `experiment_results/trajectory_N10_U10_T4_M256_tdvp2.svg`
+- `experiment_results/trajectory_N10_U10_T4_M256_tdvp2.png`
+- `experiment_results/trajectory_N10_U10_T4_M256_tdvp2_report.md`
 
 ## 参考资料
 

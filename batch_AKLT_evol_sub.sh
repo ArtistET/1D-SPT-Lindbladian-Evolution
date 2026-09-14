@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 mkdir -p sbatches/out sbatches/err log
 
@@ -20,15 +21,16 @@ loadsl=false    # 是否从某个演化切片继续
 loadt=0.0       # 加载切片对应的时刻
 
 # 时间步进
-dt=0.05
-tsmax=10
+dt=0.025
+tsmax=80          # T=2.0
+measure_every=4   # measure every 0.1 in physical time
 # 每个作业顺序计算的轨迹数。多个独立作业可用不同 traj_start 并行提交。
 ntraj=4
-traj_start=33
-njobs=8
+traj_start=1
+njobs=32          # 128-trajectory pilot; extend from traj_start=129 if needed
 seed=260903
 cutoff=1e-8
-save_traj=false
+save_traj=true
 
 # ============ 其余信息（与 GS 批量脚本保持一致）============
 Dmax=100
@@ -48,9 +50,9 @@ do
             for ((job_index=0; job_index<njobs; job_index++))
             do
                 this_traj_start=$((traj_start + job_index*ntraj))
-                echo "Submitting trajectory job for N=$N tD=$tD U=$U Dmax=$Dmax Dstep=$Dstep, loading D=$Dload Dstep=$Dsload, I=($I1,$I2,$IR,$ID), dt=$dt tsmax=$tsmax loadt=$loadt traj_start=$this_traj_start ntraj=$ntraj"
+                echo "Submitting trajectory job for N=$N tD=$tD U=$U Dmax=$Dmax Dstep=$Dstep, loading D=$Dload Dstep=$Dsload, I=($I1,$I2,$IR,$ID), dt=$dt tsmax=$tsmax measure_every=$measure_every loadt=$loadt traj_start=$this_traj_start ntraj=$ntraj"
                 # initD=Dload 是有意的：不加载时从 checkpoint 对应的键维设置开始 DMRG。
-                sbatch -c 4 --mem=8G -t 04:00:00 sub_evol.sh $load $loadsl $loadt $N $Dmax $Dstep $t1 $t2 $tR $tD $J $I1 $I2 $IR $ID $Dload $Dload $Dsload $U $dt $tsmax $ntraj $this_traj_start $seed $cutoff $save_traj
+                sbatch -c 4 --mem=8G -t 12:00:00 sub_evol.sh $load $loadsl $loadt $N $Dmax $Dstep $t1 $t2 $tR $tD $J $I1 $I2 $IR $ID $Dload $Dload $Dsload $U $dt $tsmax $ntraj $this_traj_start $seed $cutoff $save_traj $measure_every
             done
         done
     done

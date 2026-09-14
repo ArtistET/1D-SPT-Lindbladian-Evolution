@@ -28,7 +28,8 @@ isdefined(Main, :trajectory_step) || include("AKLT_evolution.jl")
 
     HS = MPO(hamiltonian, sites)
     energy_shift = real(inner(psi', HS, psi))
-    K0 = create_nojump_operator(sites, hamiltonian, dt, channels; energy_shift=energy_shift)
+    H_eff = create_effective_hamiltonian(sites, hamiltonian, channels, energy_shift)
+    K0 = create_euler_nojump_operator(sites, hamiltonian, dt, channels, energy_shift)
     nojump_state = apply(K0, psi; cutoff=1e-12, maxdim=40)
     reference_k0_sum = (-1im * dt) * hamiltonian + (1.0 + 1im * dt * energy_shift, "Id", 1)
     for channel in channels
@@ -45,14 +46,42 @@ isdefined(Main, :trajectory_step) || include("AKLT_evolution.jl")
     # This subtracts three O(1) contractions, so use a tolerance above
     # Float64 cancellation noise rather than interpreting it as a state error.
     @test abs(state_difference2) < 1e-10
-    total_weight = real(inner(nojump_state, nojump_state)) + sum(predicted)
+    tdvp_state = tdvp(H_eff, -1im * dt, psi;
+        nsite=2, maxdim=40, cutoff=1e-12, normalize=false,
+        updater_kwargs=(; ishermitian=false, tol=1e-10, krylovdim=15, maxiter=30, eager=true))
+    total_weight = real(inner(tdvp_state, tdvp_state)) + sum(predicted)
     @test total_weight ≈ 1.0 atol=1e-6
 
     next_psi, selected, reported_jump_probability, _ = trajectory_step(
-        psi, MersenneTwister(1), K0, channels, sites, dt; cutoff=1e-12, maxdim=40)
+        psi, MersenneTwister(1), H_eff, channels, sites, dt; cutoff=1e-12, maxdim=40)
     @test selected in 0:length(channels)
     @test reported_jump_probability ≈ sum(predicted) rtol=1e-10
     @test real(inner(next_psi, next_psi)) ≈ 1.0 atol=1e-10
+
+    # Explicitly jump first, then verify the no-jump propagator and dt convergence.
+    jump_index = findfirst(>(0.0), predicted)
+    post_jump = apply(create_jump_operator(sites, dt, channels[jump_index]), psi;
+        cutoff=1e-12, maxdim=40)
+    normalize!(post_jump)
+    post_jump_probability = sum(jump_probabilities(post_jump, dt, channels))
+    post_nojump = tdvp(H_eff, -1im * dt, post_jump;
+        nsite=2, maxdim=40, cutoff=1e-12, normalize=false,
+        updater_kwargs=(; ishermitian=false, tol=1e-10, krylovdim=15, maxiter=30, eager=true))
+    @test real(inner(post_nojump, post_nojump)) ≈ 1 - post_jump_probability atol=1e-6
+
+    function nojump_evolve(state, step, nsteps)
+        result = copy(state)
+        for _ in 1:nsteps
+            result = tdvp(H_eff, -1im * step, result;
+                nsite=2, maxdim=40, cutoff=1e-12, normalize=false,
+                updater_kwargs=(; ishermitian=false, tol=1e-10, krylovdim=15, maxiter=30, eager=true))
+            normalize!(result)
+        end
+        return result
+    end
+    coarse = nojump_evolve(post_jump, 1e-4, 2)
+    fine = nojump_evolve(post_jump, 5e-5, 4)
+    @test 1 - abs(inner(coarse, fine)) < 1e-6
 
     idx_st = div(N, 4)
     idx_ed = N - div(N, 4)

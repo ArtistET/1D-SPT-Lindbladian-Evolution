@@ -105,6 +105,10 @@ function parse_commandline()
             help = "number of time steps"
             default = 20
             arg_type = Int
+        "--measure-every"
+            help = "measure string order every this many evolution steps"
+            default = 1
+            arg_type = Int
         "--ntraj"
             help = "number of trajectories handled sequentially by this process"
             default = 1
@@ -164,12 +168,10 @@ function create_jump_channels(N, I1, I2, IR, ID)
     return channels
 end
 
-function create_nojump_operator(sites, hamiltonian, dt, channels; energy_shift=0.0)
-    # Construct K0 as one OpSum. Adding already-built MPOs triggers an expensive
-    # generic MPO decomposition, and the paired directions obey exactly
+function create_euler_nojump_operator(sites, hamiltonian, dt, channels, energy_shift)
+    # Recompute the scalar energy shift from the current trajectory state before
+    # each no-jump step. Paired directions obey exactly
     # L†_ab L_ab + L†_ba L_ba = rate²*(n_a+n_b-2*n_a*n_b).
-    # A real scalar shift changes only the exact no-jump state's global phase.
-    # Removing the extensive ground-state energy greatly reduces Euler error.
     os = (-1im * dt) * hamiltonian + (1.0 + 1im * dt * energy_shift, "Id", 1)
     @assert length(channels) % 4 == 0
     for first_channel in 1:4:length(channels)
@@ -187,6 +189,28 @@ function create_nojump_operator(sites, hamiltonian, dt, channels; energy_shift=0
             os += -0.5 * coefficient, channel.number_op, a
             os += -0.5 * coefficient, channel.number_op, b
             os += coefficient, channel.number_op, a, channel.number_op, b
+        end
+    end
+    return MPO(os, sites)
+end
+
+function create_effective_hamiltonian(sites, hamiltonian, channels, energy_shift)
+    # H_eff = H - E_shift - i/2 sum_mu L_mu^dagger L_mu.
+    os = hamiltonian + (-energy_shift, "Id", 1)
+    @assert length(channels) % 4 == 0
+    for first_channel in 1:4:length(channels)
+        up_forward, up_reverse, dn_forward, dn_reverse = channels[first_channel:(first_channel + 3)]
+        a, b = up_forward.target, up_forward.source
+        @assert (up_reverse.target, up_reverse.source) == (b, a)
+        @assert (dn_forward.target, dn_forward.source) == (a, b)
+        @assert (dn_reverse.target, dn_reverse.source) == (b, a)
+        @assert all(channel.rate == up_forward.rate for channel in (up_reverse, dn_forward, dn_reverse))
+        for spin_offset in (0, 2)
+            channel = channels[first_channel + spin_offset]
+            coefficient = channel.rate^2
+            os += -0.5im * coefficient, channel.number_op, a
+            os += -0.5im * coefficient, channel.number_op, b
+            os += 1im * coefficient, channel.number_op, a, channel.number_op, b
         end
     end
     return MPO(os, sites)
@@ -222,7 +246,7 @@ function jump_probabilities(psi, dt, channels; negative_tolerance=1e-9)
     return probabilities
 end
 
-function trajectory_step(psi, rng, K0, channels, sites, dt; cutoff, maxdim)
+function trajectory_step(psi, rng, H_eff, channels, sites, dt; cutoff, maxdim)
     jump_weights = jump_probabilities(psi, dt, channels)
     total_jump_probability = sum(jump_weights)
     isfinite(total_jump_probability) && total_jump_probability >= 0 ||
@@ -232,9 +256,14 @@ function trajectory_step(psi, rng, K0, channels, sites, dt; cutoff, maxdim)
 
     draw = rand(rng)
     if draw >= total_jump_probability
-        nojump_state = apply(K0, psi; cutoff=cutoff, maxdim=maxdim)
+        nojump_state = tdvp(H_eff, -1im * dt, psi;
+            nsite=2, maxdim=maxdim, cutoff=cutoff, normalize=false,
+            updater_kwargs=(; ishermitian=false, tol=1e-8, krylovdim=15, maxiter=30, eager=true))
         nojump_weight = real(inner(nojump_state, nojump_state))
         nojump_weight > 0 || error("No-jump branch has zero norm")
+        expected_weight = 1 - total_jump_probability
+        abs(nojump_weight - expected_weight) <= 0.01 ||
+            error("No-jump norm $nojump_weight disagrees with first-order expectation $expected_weight")
         normalize!(nojump_state)
         return nojump_state, 0, total_jump_probability, nojump_weight
     end
@@ -275,7 +304,7 @@ function measure_string_orders(psi, SO_odd, SO_even)
 end
 
 function trajectory_base_path(N, t1, t2, tR, tD, J, U, I1, I2, IR, ID, Dmax, dt, seed)
-    return "./trajectory_evolution/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)_I1$(I1)_I2$(I2)_IR$(IR)_ID$(ID)/Dmax$(Dmax)_dt$(dt)_seed$(seed)"
+    return "./trajectory_evolution/N$(N)_t($(t1),$(t2))_tR$(tR)_tD$(tD)_J$(J)_U$(U)_I1$(I1)_I2$(I2)_IR$(IR)_ID$(ID)/Dmax$(Dmax)_dt$(dt)_tdvp2_seed$(seed)"
 end
 
 function checkpoint_path(t, trajectory_id, N, t1, t2, tR, tD, J, U, I1, I2, IR, ID, Dmax, dt, seed; create=false)
@@ -315,6 +344,7 @@ function validate_args(args)
     args["Dmax"] > 0 || error("Dmax must be positive")
     args["dt"] > 0 || error("dt must be positive")
     args["tsmax"] >= 0 || error("tsmax must be nonnegative")
+    args["measure-every"] > 0 || error("measure-every must be positive")
     args["ntraj"] > 0 || error("ntraj must be positive")
     args["traj-start"] > 0 || error("traj-start must be positive")
     args["cutoff"] >= 0 || error("cutoff must be nonnegative")
@@ -381,6 +411,7 @@ function run_trajectories(args, sites, psi_initial, HS)
     N = args["N"]
     dt = args["dt"]
     tsmax = args["tsmax"]
+    measure_every = args["measure-every"]
     init_t = args["load"] && args["loadsl"] ? args["loadt"] : 0.0
     final_t = init_t + dt * tsmax
     Dmax = args["Dmax"]
@@ -401,7 +432,9 @@ function run_trajectories(args, sites, psi_initial, HS)
     SO_even = SO_MPO(sites, SO_h_even, SO_b_even, SO_t_even; cutoff=cutoff, maxdim=Dmax)
 
     direct_odd, direct_even = measure_string_orders(psi_initial, SO_odd, SO_even)
-    validation_maxdim = max(Dmax, maxlinkdim(psi_initial))
+    # Applying the three string-order pieces can temporarily need more bond
+    # dimension than the evolved checkpoint itself.
+    validation_maxdim = max(2Dmax, maxlinkdim(psi_initial))
     apply_odd, _ = measure(SO_h_odd, SO_b_odd, SO_t_odd, psi_initial;
         cutoff=min(cutoff, 1e-10), maxdim=validation_maxdim)
     apply_even, _ = measure(SO_h_even, SO_b_even, SO_t_even, psi_initial;
@@ -414,20 +447,23 @@ function run_trajectories(args, sites, psi_initial, HS)
     isapprox(direct_even, apply_even; rtol=1e-5, atol=1e-7) || error("Even string-order constructions disagree")
 
     channels = create_jump_channels(N, I1, I2, IR, ID)
+    hamiltonian = system_ham(N, t1, t2, tR, tD, J, U)
     energy_shift = real(inner(psi_initial', HS, psi_initial))
-    K0 = create_nojump_operator(sites, system_ham(N, t1, t2, tR, tD, J, U), dt, channels;
-        energy_shift=energy_shift)
-    println("Built ", length(channels), " jump channels as metadata; maxlinkdim(K0)=", maxlinkdim(K0),
-        "; no-jump energy shift=", energy_shift)
+    H_eff = create_effective_hamiltonian(sites, hamiltonian, channels, energy_shift)
+    println("Built ", length(channels), " jump channels as metadata; maxlinkdim(H_eff)=",
+        maxlinkdim(H_eff), "; no-jump propagator=two-site non-Hermitian TDVP; energy shift=", energy_shift)
 
-    times = collect(range(init_t; step=dt, length=tsmax + 1))
-    C_odd_samples = fill(ComplexF64(NaN, NaN), ntraj, tsmax + 1)
-    C_even_samples = fill(ComplexF64(NaN, NaN), ntraj, tsmax + 1)
+    measurement_steps = collect(0:measure_every:tsmax)
+    last(measurement_steps) == tsmax || push!(measurement_steps, tsmax)
+    times = init_t .+ dt .* measurement_steps
+    nmeasurements = length(times)
+    C_odd_samples = fill(ComplexF64(NaN, NaN), ntraj, nmeasurements)
+    C_even_samples = fill(ComplexF64(NaN, NaN), ntraj, nmeasurements)
     jump_indices = zeros(Int, ntraj, tsmax)
     total_jump_probabilities = fill(NaN, ntraj, tsmax)
     branch_weights = fill(NaN, ntraj, tsmax)
-    bond_dimensions = zeros(Int, ntraj, tsmax + 1)
-    measurement_seconds = zeros(ntraj, tsmax + 1)
+    bond_dimensions = zeros(Int, ntraj, nmeasurements)
+    measurement_seconds = zeros(ntraj, nmeasurements)
     evolution_seconds = zeros(ntraj, tsmax)
     checkpoint_seconds = zeros(ntraj)
     output_path = result_path(init_t, final_t, traj_start, traj_stop, N, t1, t2, tR, tD, J, U, I1, I2, IR, ID, Dmax, dt, seed)
@@ -455,32 +491,36 @@ function run_trajectories(args, sites, psi_initial, HS)
         rng = trajectory_rng(seed, trajectory_id, completed_steps)
         println("Trajectory ", trajectory_id, " started; maxlinkdim=", maxlinkdim(psi))
 
-        for time_index in 1:(tsmax + 1)
-            measurement_start = time()
-            C_odd_samples[local_id, time_index], C_even_samples[local_id, time_index] =
-                measure_string_orders(psi, SO_odd, SO_even)
-            measurement_seconds[local_id, time_index] = time() - measurement_start
-            bond_dimensions[local_id, time_index] = maxlinkdim(psi)
-            println("Trajectory ", trajectory_id, " T=", time_label(times[time_index]),
-                " SO_odd=", real(C_odd_samples[local_id, time_index]),
-                " SO_even=", real(C_even_samples[local_id, time_index]),
-                " maxlinkdim=", bond_dimensions[local_id, time_index],
-                " measurement=", format_hms(measurement_seconds[local_id, time_index]))
+        measurement_index = 1
+        for step_index in 0:tsmax
+            if step_index == measurement_steps[measurement_index]
+                measurement_start = time()
+                C_odd_samples[local_id, measurement_index], C_even_samples[local_id, measurement_index] =
+                    measure_string_orders(psi, SO_odd, SO_even)
+                measurement_seconds[local_id, measurement_index] = time() - measurement_start
+                bond_dimensions[local_id, measurement_index] = maxlinkdim(psi)
+                println("Trajectory ", trajectory_id, " T=", time_label(times[measurement_index]),
+                    " SO_odd=", real(C_odd_samples[local_id, measurement_index]),
+                    " SO_even=", real(C_even_samples[local_id, measurement_index]),
+                    " maxlinkdim=", bond_dimensions[local_id, measurement_index],
+                    " measurement=", format_hms(measurement_seconds[local_id, measurement_index]))
+                measurement_index += 1
+            end
 
-            time_index > tsmax && break
+            step_index == tsmax && break
             evolution_start = time()
             psi, jump_index, total_jump_probability, branch_weight = trajectory_step(
-                psi, rng, K0, channels, sites, dt; cutoff=cutoff, maxdim=Dmax)
-            evolution_seconds[local_id, time_index] = time() - evolution_start
-            jump_indices[local_id, time_index] = jump_index
-            total_jump_probabilities[local_id, time_index] = total_jump_probability
-            branch_weights[local_id, time_index] = branch_weight
+                psi, rng, H_eff, channels, sites, dt; cutoff=cutoff, maxdim=Dmax)
+            evolution_seconds[local_id, step_index + 1] = time() - evolution_start
+            jump_indices[local_id, step_index + 1] = jump_index
+            total_jump_probabilities[local_id, step_index + 1] = total_jump_probability
+            branch_weights[local_id, step_index + 1] = branch_weight
             event = jump_index == 0 ? "no jump" : channels[jump_index].label
-            println("Trajectory ", trajectory_id, " step ", time_index, "/", tsmax,
+            println("Trajectory ", trajectory_id, " step ", step_index + 1, "/", tsmax,
                 " event=", event, " jump_probability=", total_jump_probability,
                 " branch_norm=", branch_weight,
                 " maxlinkdim=", maxlinkdim(psi),
-                " evolution=", format_hms(evolution_seconds[local_id, time_index]))
+                " evolution=", format_hms(evolution_seconds[local_id, step_index + 1]))
         end
 
         if args["save-traj"]

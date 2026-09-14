@@ -7,6 +7,8 @@
 #SBATCH -o sbatches/out/%x_%j.out
 #SBATCH -e sbatches/err/%x_%j.err
 
+set -o pipefail
+
 CURRENT_TIME=$(date +"%Y%m%d_%H%M%S")
 
 LOG_DIR=log
@@ -40,11 +42,13 @@ dt=${20:-0.01}
 tsmax=${21:-20}
 ntraj=${22:-1}
 traj_start=${23:-1}
+[[ "$traj_start" == array ]] && traj_start=${SLURM_ARRAY_TASK_ID:?}
 seed=${24:-1234}
 cutoff=${25:-1e-8}
 save_traj=${26:-false}
+measure_every=${27:-1}
 
-LOG_FILE="$LOG_DIR/AKLT_evol_${CURRENT_TIME}_N${N}_Dmax${Dmax}_t1_${t1}_t2_${t2}_tR${tR}_tD${tD}_J${J}_U${U}_I1${I1}_I2${I2}_IR${IR}_ID${ID}_loadt${loadt}_dt${dt}_ts${tsmax}_traj${traj_start}n${ntraj}.log"
+LOG_FILE="$LOG_DIR/AKLT_evol_${CURRENT_TIME}_N${N}_Dmax${Dmax}_t1_${t1}_t2_${t2}_tR${tR}_tD${tD}_J${J}_U${U}_I1${I1}_I2${I2}_IR${IR}_ID${ID}_loadt${loadt}_dt${dt}_ts${tsmax}_me${measure_every}_traj${traj_start}n${ntraj}.log"
 
 exec > >(tee -a "$LOG_FILE") 2>&1
 echo "Slurm job=${SLURM_JOB_ID:-interactive} host=$(hostname) started=$(date --iso-8601=seconds)"
@@ -60,5 +64,6 @@ julia --project=/public/home/rdcha/Workspace/1D-SPT-Lindbladian-Evolution \
   --initD "$initD" \
   --Dload "$Dload" --Dstepload "$Dstepload" -U "$U" \
   --dt "$dt" --tsmax "$tsmax" \
+  --measure-every "$measure_every" \
   --ntraj "$ntraj" --traj-start "$traj_start" --seed "$seed" \
   --cutoff "$cutoff" --save-traj "$save_traj"
