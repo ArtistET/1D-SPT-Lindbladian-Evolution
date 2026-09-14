@@ -10,6 +10,9 @@
 set -o pipefail
 
 CURRENT_TIME=$(date +"%Y%m%d_%H%M%S")
+PROJECT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+JULIA_BIN=${JULIA_BIN:-julia}
+cd "$PROJECT_DIR"
 
 LOG_DIR=log
 mkdir -p "$LOG_DIR"
@@ -53,8 +56,8 @@ LOG_FILE="$LOG_DIR/AKLT_evol_${CURRENT_TIME}_N${N}_Dmax${Dmax}_t1_${t1}_t2_${t2}
 exec > >(tee -a "$LOG_FILE") 2>&1
 echo "Slurm job=${SLURM_JOB_ID:-interactive} host=$(hostname) started=$(date --iso-8601=seconds)"
 
-julia --project=/public/home/rdcha/Workspace/1D-SPT-Lindbladian-Evolution \
-  /public/home/rdcha/Workspace/1D-SPT-Lindbladian-Evolution/AKLT_evolution.jl \
+"$JULIA_BIN" --project="$PROJECT_DIR" \
+  "$PROJECT_DIR/AKLT_evolution.jl" \
   --load "$load" --loadsl "$loadsl" --loadt "$loadt" -N "$N" \
   --Dmax "$Dmax" --Dstep "$Dstep" \
   --t1 "$t1" --t2 "$t2" \
