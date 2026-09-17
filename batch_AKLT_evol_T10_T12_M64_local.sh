@@ -30,7 +30,7 @@ do
         done
         printf 'start tD=%s trajectory=%s\n' "$tD" "$trajectory_id" | tee -a "$manifest"
         ./sub_evol.sh true true 10.0 10 100 20 0.1 0.2 1.0 "$tD" 0.0 \
-            0.1 0.1 0.1 0.1 100 100 20 12.0 0.025 80 1 "$trajectory_id" \
+            0.1 0.1 0.1 0.1 100 100 20 10.0 0.025 80 1 "$trajectory_id" \
             260903 1e-8 true 4 &
     done
 done
