@@ -16,8 +16,7 @@ with open(input_path, newline="", encoding="utf-8") as handle:
 
 sample_count = max(int(row["samples"]) for row in rows)
 available_times = sorted({float(row["time"]) for row in rows if int(row["samples"]) == sample_count})
-time_indices = sorted({round(index * (len(available_times) - 1) / 5) for index in range(6)})
-selected_times = tuple(available_times[index] for index in time_indices)
+selected_times = tuple(time for time in available_times if math.isclose(time % 2, 0.0, abs_tol=1e-10))
 selected = [
     row for row in rows
     if int(row["samples"]) == sample_count
@@ -51,11 +50,11 @@ for parity in ("odd", "even"):
     if max(differences) > 1e-8:
         raise SystemExit(f"{parity} t=0 values do not reproduce the ground-state benchmark")
 
-width, height = 1400, 670
+width, height = 1400, 700
 panel_width, panel_height = 570, 440
 panel_lefts = (90, 790)
 panel_top = 100
-colors = ("#0072B2", "#D55E00", "#009E73", "#CC79A7", "#E69F00", "#56B4E9")
+colors = ("#0072B2", "#D55E00", "#009E73", "#CC79A7", "#E69F00", "#56B4E9", "#7A3E9D")
 
 
 def svg_text(x, y, value, *, size=14, anchor="middle", weight="normal", rotate=None):
@@ -141,18 +140,18 @@ for panel_index, parity in enumerate(("odd", "even")):
     parts.append(svg_text(left - 64, (panel_top + bottom) / 2, "String order", size=15, rotate=-90))
 
 legend_y = 605
-legend_start = 220
+legend_start = 90
 for index, time in enumerate(selected_times):
-    x = legend_start + index * 132
+    x = legend_start + index * 115
     parts.append(f'<line x1="{x}" x2="{x+24}" y1="{legend_y}" y2="{legend_y}" stroke="{colors[index]}" stroke-width="3"/>')
     parts.append(f'<circle cx="{x+12}" cy="{legend_y}" r="3.5" fill="{colors[index]}"/>')
     parts.append(svg_text(x + 31, legend_y + 5, f"t={time:g}", size=12, anchor="start"))
-parts.append('<path d="M1034,600 L1044,610 M1034,610 L1044,600" stroke="#111827" stroke-width="2"/>')
-parts.append(svg_text(1051, legend_y + 5, "U=10 GS", size=12, anchor="start"))
-parts.append(f'<line x1="1180" x2="1204" y1="{legend_y}" y2="{legend_y}" stroke="#6b7280" stroke-width="2" stroke-dasharray="7 5"/>')
-parts.append(svg_text(1211, legend_y + 5, "U=0 GS D100", size=12, anchor="start"))
-parts.append(f'<rect x="1034" y="630" width="10" height="10" fill="#ffffff" stroke="#6b7280" stroke-width="2"/>')
-parts.append(svg_text(1051, 640, "U=0 GS D200 at tR/tD=1", size=12, anchor="start"))
+parts.append('<path d="M925,600 L935,610 M925,610 L935,600" stroke="#111827" stroke-width="2"/>')
+parts.append(svg_text(942, legend_y + 5, "U=10 GS", size=12, anchor="start"))
+parts.append(f'<line x1="1045" x2="1069" y1="{legend_y}" y2="{legend_y}" stroke="#6b7280" stroke-width="2" stroke-dasharray="7 5"/>')
+parts.append(svg_text(1076, legend_y + 5, "U=0 GS D100", size=12, anchor="start"))
+parts.append(f'<rect x="1210" y="600" width="10" height="10" fill="#ffffff" stroke="#6b7280" stroke-width="2"/>')
+parts.append(svg_text(1227, legend_y + 5, "U=0 GS D200 center", size=12, anchor="start"))
 parts.append('</svg>')
 
 Path(output_path).write_text("\n".join(parts), encoding="utf-8")

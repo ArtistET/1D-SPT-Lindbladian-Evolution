@@ -56,9 +56,13 @@ with output.open("w", newline="", encoding="utf-8") as handle:
     writer.writeheader()
     writer.writerows(merged)
 
+expected_times = sorted({float(row["time"]) for row in merged})
 for key in {(row["tD"], row["samples"]) for row in merged}:
     times = [float(row["time"]) for row in merged if (row["tD"], row["samples"]) == key]
-    if len(times) != 101 or not math.isclose(times[0], 0.0) or not math.isclose(times[-1], 10.0):
+    if len(times) != len(expected_times) or any(
+        not math.isclose(actual, expected, abs_tol=1e-10)
+        for actual, expected in zip(times, expected_times)
+    ):
         raise SystemExit(f"incomplete merged time grid for {key}")
 
 slope_groups = [read(path.with_name(path.stem + "_slopes.csv")) for path in segments]
@@ -84,9 +88,16 @@ with slope_output.open("w", newline="", encoding="utf-8") as handle:
     writer.writeheader()
     writer.writerows(slope_rows)
 
+expected_slope_times = sorted({float(row["time"]) for row in slope_rows})
 for sample_count in slope_samples:
     times = [float(row["time"]) for row in slope_rows if int(row["samples"]) == sample_count]
-    if len(times) != 101 or not math.isclose(times[0], 0.0) or not math.isclose(times[-1], 10.0):
+    if len(times) != len(expected_slope_times) or any(
+        not math.isclose(actual, expected, abs_tol=1e-10)
+        for actual, expected in zip(times, expected_slope_times)
+    ):
         raise SystemExit(f"incomplete merged slope grid for M={sample_count}")
 
-print(f"Wrote {output} and {slope_output}; samples={sorted(samples)}; times=0:0.1:10")
+print(
+    f"Wrote {output} and {slope_output}; samples={sorted(samples)}; "
+    f"times={expected_times[0]:g}:0.1:{expected_times[-1]:g}"
+)
