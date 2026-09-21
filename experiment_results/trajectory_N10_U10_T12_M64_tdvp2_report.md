@@ -111,6 +111,6 @@ ground_states/N10_t(0.1,0.2)_tR1.0_tD<tD>_J0.0_U10.0/
 
 - `trajectory_N10_U10_T12_M64_tdvp2.csv`、`_slopes.csv`：拼接后的 `T=0→12` 统计和中心斜率。
 - `trajectory_N10_U10_T12_M64_tdvp2_segment.csv`、`_segment_slopes.csv`：原始 `T=10→12` 分段汇总。
-- `trajectory_N10_U10_T12_M64_tdvp2.svg`、`.png`：含误差棒、初态 benchmark、`U=0,D=100` 虚线和 `U=0,D=200` 中心点的图。
+- `trajectory_N10_U10_T12_M64_tdvp2.svg`、`.png`：前两幅子图含误差棒、初态 benchmark、`U=0,D=100` 虚线和 `U=0,D=200` 中心点；第三幅子图给出 odd/even 中心斜率绝对值随时间的变化，并以两条虚线标出 `U=0,D=100` 的 odd/even 基态斜率。
 
 时间扫描到此暂停。下一步是增加 `T=12` 的独立样本数，验证 `T=11→12` 平台和近零斜率。

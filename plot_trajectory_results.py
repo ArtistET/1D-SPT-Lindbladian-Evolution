@@ -13,6 +13,9 @@ if len(sys.argv) != 3:
 input_path, output_path = sys.argv[1:]
 with open(input_path, newline="", encoding="utf-8") as handle:
     rows = list(csv.DictReader(handle))
+slope_path = Path(input_path).with_name(Path(input_path).stem + "_slopes.csv")
+with slope_path.open(newline="", encoding="utf-8") as handle:
+    slope_rows = list(csv.DictReader(handle))
 
 sample_count = max(int(row["samples"]) for row in rows)
 available_times = sorted({float(row["time"]) for row in rows if int(row["samples"]) == sample_count})
@@ -41,6 +44,10 @@ u0_benchmark = {
              1.01: 0.019572602503736065, 1.02: 0.019289489602627254},
 }
 u0_d200_center = {"odd": 0.05233055680636908, "even": 0.05438395563875983}
+u0_slopes = {
+    parity: abs((values[0.99] - values[1.01]) / (1 / 0.99 - 1 / 1.01))
+    for parity, values in u0_benchmark.items()
+}
 
 for parity in ("odd", "even"):
     differences = []
@@ -50,9 +57,9 @@ for parity in ("odd", "even"):
     if max(differences) > 1e-8:
         raise SystemExit(f"{parity} t=0 values do not reproduce the ground-state benchmark")
 
-width, height = 1400, 700
-panel_width, panel_height = 570, 440
-panel_lefts = (90, 790)
+width, height = 2000, 700
+panel_width, panel_height = 520, 440
+panel_lefts = (75, 710, 1370)
 panel_top = 100
 colors = ("#0072B2", "#D55E00", "#009E73", "#CC79A7", "#E69F00", "#56B4E9", "#7A3E9D")
 
@@ -139,19 +146,80 @@ for panel_index, parity in enumerate(("odd", "even")):
     parts.append(svg_text((left + right) / 2, bottom + 51, "t_R / t_D", size=15))
     parts.append(svg_text(left - 64, (panel_top + bottom) / 2, "String order", size=15, rotate=-90))
 
+# Central finite-difference slopes versus time. A logarithmic axis makes the
+# two-order-of-magnitude relaxation visible; error bars that include zero are
+# clipped at the displayed lower bound.
+slope_rows = [row for row in slope_rows if int(row["samples"]) == sample_count]
+slope_times = sorted({float(row["time"]) for row in slope_rows})
+if slope_times != available_times:
+    raise SystemExit("slope CSV does not match the trajectory time grid")
+left = panel_lefts[2]
+right = left + panel_width
+bottom = panel_top + panel_height
+slope_y_min, slope_y_max = 1e-3, 2.0
+sx = lambda value: left + (value - slope_times[0]) / (slope_times[-1] - slope_times[0]) * panel_width
+sy = lambda value: bottom - (math.log10(max(value, slope_y_min)) - math.log10(slope_y_min)) / (
+    math.log10(slope_y_max) - math.log10(slope_y_min)
+) * panel_height
+parts.append(f'<rect x="{left}" y="{panel_top}" width="{panel_width}" height="{panel_height}" fill="none" stroke="#4b5563"/>')
+for value in (1e-3, 1e-2, 1e-1, 1.0):
+    y = sy(value)
+    parts.append(f'<line x1="{left}" x2="{right}" y1="{y:.2f}" y2="{y:.2f}" stroke="#d9dee5"/>')
+    parts.append(svg_text(left - 10, y + 5, f"{value:g}", size=12, anchor="end"))
+for time in selected_times:
+    x = sx(time)
+    parts.append(f'<line x1="{x:.2f}" x2="{x:.2f}" y1="{panel_top}" y2="{bottom}" stroke="#edf0f4"/>')
+    parts.append(svg_text(x, bottom + 23, f"{time:g}", size=12))
+
+slope_colors = {"odd": "#0072B2", "even": "#D55E00"}
+for parity in ("odd", "even"):
+    points = []
+    for row in slope_rows:
+        time = float(row["time"])
+        value = abs(float(row[f"{parity}_slope"]))
+        error = float(row[f"{parity}_slope_stderr"])
+        x, y = sx(time), sy(value)
+        points.append((x, y))
+        if math.isclose(time, round(time), abs_tol=1e-10):
+            y_low = sy(max(value - error, slope_y_min))
+            y_high = sy(min(value + error, slope_y_max))
+            parts.append(f'<line x1="{x:.2f}" x2="{x:.2f}" y1="{y_low:.2f}" y2="{y_high:.2f}" stroke="{slope_colors[parity]}" opacity="0.65"/>')
+    point_string = " ".join(f"{x:.2f},{y:.2f}" for x, y in points)
+    parts.append(f'<polyline points="{point_string}" fill="none" stroke="{slope_colors[parity]}" stroke-width="2"/>')
+    for row in slope_rows:
+        time = float(row["time"])
+        if math.isclose(time, round(time), abs_tol=1e-10):
+            value = abs(float(row[f"{parity}_slope"]))
+            parts.append(f'<circle cx="{sx(time):.2f}" cy="{sy(value):.2f}" r="3.2" fill="{slope_colors[parity]}"/>')
+    y_ref = sy(u0_slopes[parity])
+    parts.append(f'<line x1="{left}" x2="{right}" y1="{y_ref:.2f}" y2="{y_ref:.2f}" stroke="{slope_colors[parity]}" stroke-width="2" stroke-dasharray="7 5"/>')
+
+parts.append(svg_text((left + right) / 2, panel_top - 16, "Absolute central slopes", size=17, weight="bold"))
+parts.append(svg_text((left + right) / 2, bottom + 51, "Evolution time", size=15))
+parts.append(svg_text(left - 58, (panel_top + bottom) / 2, "|dSO/d(t_R/t_D)| (log)", size=15, rotate=-90))
+parts.append(svg_text((left + right) / 2, 665, "Error bars including zero are clipped at 10⁻³", size=11))
+
 legend_y = 605
-legend_start = 90
+legend_start = 75
 for index, time in enumerate(selected_times):
-    x = legend_start + index * 115
+    x = legend_start + index * 105
     parts.append(f'<line x1="{x}" x2="{x+24}" y1="{legend_y}" y2="{legend_y}" stroke="{colors[index]}" stroke-width="3"/>')
     parts.append(f'<circle cx="{x+12}" cy="{legend_y}" r="3.5" fill="{colors[index]}"/>')
     parts.append(svg_text(x + 31, legend_y + 5, f"t={time:g}", size=12, anchor="start"))
-parts.append('<path d="M925,600 L935,610 M925,610 L935,600" stroke="#111827" stroke-width="2"/>')
-parts.append(svg_text(942, legend_y + 5, "U=10 GS", size=12, anchor="start"))
-parts.append(f'<line x1="1045" x2="1069" y1="{legend_y}" y2="{legend_y}" stroke="#6b7280" stroke-width="2" stroke-dasharray="7 5"/>')
-parts.append(svg_text(1076, legend_y + 5, "U=0 GS D100", size=12, anchor="start"))
-parts.append(f'<rect x="1210" y="600" width="10" height="10" fill="#ffffff" stroke="#6b7280" stroke-width="2"/>')
-parts.append(svg_text(1227, legend_y + 5, "U=0 GS D200 center", size=12, anchor="start"))
+parts.append('<path d="M850,600 L860,610 M850,610 L860,600" stroke="#111827" stroke-width="2"/>')
+parts.append(svg_text(867, legend_y + 5, "U=10 GS", size=12, anchor="start"))
+parts.append(f'<line x1="970" x2="994" y1="{legend_y}" y2="{legend_y}" stroke="#6b7280" stroke-width="2" stroke-dasharray="7 5"/>')
+parts.append(svg_text(1001, legend_y + 5, "U=0 GS D100", size=12, anchor="start"))
+parts.append(f'<rect x="1135" y="600" width="10" height="10" fill="#ffffff" stroke="#6b7280" stroke-width="2"/>')
+parts.append(svg_text(1152, legend_y + 5, "U=0 GS D200 center", size=12, anchor="start"))
+parts.append(f'<line x1="1390" x2="1414" y1="{legend_y}" y2="{legend_y}" stroke="{slope_colors["odd"]}" stroke-width="2"/>')
+parts.append(svg_text(1421, legend_y + 5, "|odd slope|", size=12, anchor="start"))
+parts.append(f'<line x1="1530" x2="1554" y1="{legend_y}" y2="{legend_y}" stroke="{slope_colors["even"]}" stroke-width="2"/>')
+parts.append(svg_text(1561, legend_y + 5, "|even slope|", size=12, anchor="start"))
+parts.append(f'<line x1="1680" x2="1704" y1="{legend_y}" y2="{legend_y}" stroke="{slope_colors["odd"]}" stroke-width="2" stroke-dasharray="7 5"/>')
+parts.append(svg_text(1711, legend_y + 5, "U=0 odd", size=12, anchor="start"))
+parts.append(f'<line x1="1810" x2="1834" y1="{legend_y}" y2="{legend_y}" stroke="{slope_colors["even"]}" stroke-width="2" stroke-dasharray="7 5"/>')
+parts.append(svg_text(1841, legend_y + 5, "U=0 even", size=12, anchor="start"))
 parts.append('</svg>')
 
 Path(output_path).write_text("\n".join(parts), encoding="utf-8")
