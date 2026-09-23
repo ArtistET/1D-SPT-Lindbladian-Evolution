@@ -29,12 +29,26 @@ ratios = sorted({float(row["tR_over_tD"]) for row in selected})
 if len(selected) != len(selected_times) * len(ratios):
     raise SystemExit("input CSV does not contain a complete time/ratio grid")
 
-benchmark = {
+d100_benchmark = {
     "odd": {0.98: 0.0216377265205618, 0.99: 0.029488338463743383, 1.0: 0.038673304161676754,
             1.01: 0.048620819656861526, 1.02: 0.05851569991410938},
     "even": {0.98: 0.06025785025440545, 0.99: 0.04996164346582242, 1.0: 0.039813015019188644,
              1.01: 0.030530533098452002, 1.02: 0.022696555464249635},
 }
+
+# The plotted ground-state crosses come from the actual t=0 rows. Keep the
+# historical D100 constants as an independent regression check when applicable,
+# while allowing QN D400 (and future Dmax) data to use their own initial states.
+benchmark = {"odd": {}, "even": {}}
+initial_rows = [
+    row for row in selected
+    if math.isclose(float(row["time"]), 0.0, abs_tol=1e-10)
+]
+for row in initial_rows:
+    tD = float(row["tD"])
+    benchmark["odd"][tD] = float(row["odd_mean"])
+    benchmark["even"][tD] = float(row["even_mean"])
+initial_max_bond = max(int(float(row["max_bond_dimension"])) for row in initial_rows)
 
 # Existing N=10, Dmax=100 DMRG checkpoints (bond-unconverged); no matching U=1 data exists.
 u0_benchmark = {
@@ -49,13 +63,14 @@ u0_slopes = {
     for parity, values in u0_benchmark.items()
 }
 
-for parity in ("odd", "even"):
-    differences = []
-    for row in selected:
-        if math.isclose(float(row["time"]), 0.0, abs_tol=1e-10):
-            differences.append(abs(float(row[f"{parity}_mean"]) - benchmark[parity][float(row["tD"])]))
-    if max(differences) > 1e-8:
-        raise SystemExit(f"{parity} t=0 values do not reproduce the ground-state benchmark")
+if initial_max_bond == 100:
+    for parity in ("odd", "even"):
+        differences = [
+            abs(float(row[f"{parity}_mean"]) - d100_benchmark[parity][float(row["tD"])])
+            for row in initial_rows
+        ]
+        if max(differences) > 1e-8:
+            raise SystemExit(f"{parity} t=0 values do not reproduce the D100 ground-state benchmark")
 
 width, height = 2000, 700
 panel_width, panel_height = 520, 440
@@ -74,7 +89,7 @@ dt = float(rows[0].get("dt", 0.05))
 parts = [
     f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
     '<rect width="100%" height="100%" fill="#ffffff"/>',
-    svg_text(width / 2, 34, f"Quantum trajectories: N=10, U=10, M={sample_count}, dt={dt:g}", size=21, weight="bold"),
+    svg_text(width / 2, 34, f"Quantum trajectories: N=10, U=10, M={sample_count}, Dmax={initial_max_bond}, dt={dt:g}", size=21, weight="bold"),
     svg_text(width / 2, 59, "Points: trajectory mean; bars: standard error; crosses: U=10 GS; dashed: U=0 GS D100 (unconverged)", size=13),
 ]
 
@@ -223,4 +238,5 @@ parts.append(svg_text(1841, legend_y + 5, "U=0 even", size=12, anchor="start"))
 parts.append('</svg>')
 
 Path(output_path).write_text("\n".join(parts), encoding="utf-8")
-print(f"Wrote {output_path}; M={sample_count}; t=0 benchmark verified within 1e-8")
+verification = "D100 benchmark verified within 1e-8" if initial_max_bond == 100 else "t=0 ground states read from input"
+print(f"Wrote {output_path}; M={sample_count}; {verification}")
