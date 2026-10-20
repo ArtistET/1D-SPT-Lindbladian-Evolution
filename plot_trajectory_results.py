@@ -7,10 +7,11 @@ import sys
 from pathlib import Path
 
 
-if len(sys.argv) != 3:
-    raise SystemExit("usage: python3 plot_trajectory_results.py INPUT.csv OUTPUT.svg")
+if len(sys.argv) not in (3, 4):
+    raise SystemExit("usage: python3 plot_trajectory_results.py INPUT.csv OUTPUT.svg [U0_GS.csv]")
 
-input_path, output_path = sys.argv[1:]
+input_path, output_path = sys.argv[1:3]
+u0_reference_path = sys.argv[3] if len(sys.argv) == 4 else None
 with open(input_path, newline="", encoding="utf-8") as handle:
     rows = list(csv.DictReader(handle))
 slope_path = Path(input_path).with_name(Path(input_path).stem + "_slopes.csv")
@@ -50,7 +51,8 @@ for row in initial_rows:
     benchmark["even"][tD] = float(row["even_mean"])
 initial_max_bond = max(int(float(row["max_bond_dimension"])) for row in initial_rows)
 
-# Existing N=10, Dmax=100 DMRG checkpoints (bond-unconverged); no matching U=1 data exists.
+# Historical N=10, Dmax=100 DMRG checkpoints (bond-unconverged). An optional
+# verified CSV replaces them for the current figure without changing old plots.
 u0_benchmark = {
     "odd": {0.98: 0.019105032165657555, 0.99: 0.019391160426581115, 1.0: 0.019679175437066633,
             1.01: 0.01996615795171945, 1.02: 0.02025063167811967},
@@ -58,6 +60,23 @@ u0_benchmark = {
              1.01: 0.019572602503736065, 1.02: 0.019289489602627254},
 }
 u0_d200_center = {"odd": 0.05233055680636908, "even": 0.05438395563875983}
+u0_label = "U=0 GS D100 (unconverged)"
+if u0_reference_path:
+    with open(u0_reference_path, newline="", encoding="utf-8") as handle:
+        reference_rows = list(csv.DictReader(handle))
+    reference_tds = {float(row["tD"]) for row in reference_rows}
+    if len(reference_rows) != len(ratios) or reference_tds != {float(row["tD"]) for row in initial_rows}:
+        raise SystemExit("U=0 ground-state reference does not match the trajectory tD grid")
+    u0_benchmark = {
+        parity: {float(row["tD"]): float(row[parity]) for row in reference_rows}
+        for parity in ("odd", "even")
+    }
+    if any(not math.isfinite(value) for values in u0_benchmark.values() for value in values.values()):
+        raise SystemExit("U=0 ground-state reference contains non-finite SO")
+    u0_dmax = {int(row["Dmax"]) for row in reference_rows}
+    if len(u0_dmax) != 1 or any(row["hasqns"].lower() != "true" for row in reference_rows):
+        raise SystemExit("U=0 reference must have one QN-conserving Dmax")
+    u0_label = f"U=0 QN GS D{u0_dmax.pop()} (bond-limited)"
 u0_slopes = {
     parity: abs((values[0.99] - values[1.01]) / (1 / 0.99 - 1 / 1.01))
     for parity, values in u0_benchmark.items()
@@ -79,10 +98,9 @@ panel_top = 100
 colors = ("#0072B2", "#D55E00", "#009E73", "#CC79A7", "#E69F00", "#56B4E9", "#7A3E9D")
 
 
-def svg_text(x, y, value, *, size=14, anchor="middle", weight="normal", rotate=None):
-    transform = f' transform="rotate({rotate} {x} {y})"' if rotate is not None else ""
+def svg_text(x, y, value, *, size=14, anchor="middle", weight="normal"):
     return (f'<text x="{x:.2f}" y="{y:.2f}" text-anchor="{anchor}" font-size="{size}" '
-            f'font-weight="{weight}" fill="#17202a"{transform}>{value}</text>')
+            f'font-weight="{weight}" fill="#17202a">{value}</text>')
 
 
 dt = float(rows[0].get("dt", 0.05))
@@ -90,7 +108,7 @@ parts = [
     f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
     '<rect width="100%" height="100%" fill="#ffffff"/>',
     svg_text(width / 2, 34, f"Quantum trajectories: N=10, U=10, M={sample_count}, Dmax={initial_max_bond}, dt={dt:g}", size=21, weight="bold"),
-    svg_text(width / 2, 59, "Points: trajectory mean; bars: standard error; crosses: U=10 GS; dashed: U=0 GS D100 (unconverged)", size=13),
+    svg_text(width / 2, 59, f"Points: trajectory mean; bars: standard error; crosses: U=10 GS; dashed: {u0_label}", size=13),
 ]
 
 x_min, x_max = min(ratios), max(ratios)
@@ -105,7 +123,8 @@ for panel_index, parity in enumerate(("odd", "even")):
         y_values.extend((mean - error, mean + error))
     y_values.extend(benchmark[parity].values())
     y_values.extend(u0_benchmark[parity].values())
-    y_values.append(u0_d200_center[parity])
+    if not u0_reference_path:
+        y_values.append(u0_d200_center[parity])
     y_min, y_max = min(y_values), max(y_values)
     padding = 0.07 * (y_max - y_min)
     y_min -= padding
@@ -154,12 +173,13 @@ for panel_index, parity in enumerate(("odd", "even")):
         for tD, value in sorted(u0_benchmark[parity].items(), key=lambda item: 1 / item[0])
     )
     parts.append(f'<polyline points="{u0_points}" fill="none" stroke="#6b7280" stroke-width="2" stroke-dasharray="7 5"/>')
-    d200_x, d200_y = sx(1.0), sy(u0_d200_center[parity])
-    parts.append(f'<rect x="{d200_x-5:.2f}" y="{d200_y-5:.2f}" width="10" height="10" fill="#ffffff" stroke="#6b7280" stroke-width="2"/>')
+    if not u0_reference_path:
+        d200_x, d200_y = sx(1.0), sy(u0_d200_center[parity])
+        parts.append(f'<rect x="{d200_x-5:.2f}" y="{d200_y-5:.2f}" width="10" height="10" fill="#ffffff" stroke="#6b7280" stroke-width="2"/>')
 
     parts.append(svg_text((left + right) / 2, panel_top - 16, f"{parity.capitalize()} string order", size=17, weight="bold"))
     parts.append(svg_text((left + right) / 2, bottom + 51, "t_R / t_D", size=15))
-    parts.append(svg_text(left - 64, (panel_top + bottom) / 2, "String order", size=15, rotate=-90))
+    parts.append(svg_text(left - 64, panel_top - 16, "String order", size=13, anchor="start"))
 
 # Central finite-difference slopes versus time. A logarithmic axis makes the
 # two-order-of-magnitude relaxation visible; error bars that include zero are
@@ -195,7 +215,7 @@ for parity in ("odd", "even"):
         error = float(row[f"{parity}_slope_stderr"])
         x, y = sx(time), sy(value)
         points.append((x, y))
-        if math.isclose(time, round(time), abs_tol=1e-10):
+        if error > 1e-12 and math.isclose(time, round(time), abs_tol=1e-10):
             y_low = sy(max(value - error, slope_y_min))
             y_high = sy(min(value + error, slope_y_max))
             parts.append(f'<line x1="{x:.2f}" x2="{x:.2f}" y1="{y_low:.2f}" y2="{y_high:.2f}" stroke="{slope_colors[parity]}" opacity="0.65"/>')
@@ -211,7 +231,7 @@ for parity in ("odd", "even"):
 
 parts.append(svg_text((left + right) / 2, panel_top - 16, "Absolute central slopes", size=17, weight="bold"))
 parts.append(svg_text((left + right) / 2, bottom + 51, "Evolution time", size=15))
-parts.append(svg_text(left - 58, (panel_top + bottom) / 2, "|dSO/d(t_R/t_D)| (log)", size=15, rotate=-90))
+parts.append(svg_text(left - 58, panel_top - 16, "|dSO/d(t_R/t_D)| (log)", size=13, anchor="start"))
 parts.append(svg_text((left + right) / 2, 665, "Error bars including zero are clipped at 10⁻³", size=11))
 
 legend_y = 605
@@ -224,9 +244,10 @@ for index, time in enumerate(selected_times):
 parts.append('<path d="M850,600 L860,610 M850,610 L860,600" stroke="#111827" stroke-width="2"/>')
 parts.append(svg_text(867, legend_y + 5, "U=10 GS", size=12, anchor="start"))
 parts.append(f'<line x1="970" x2="994" y1="{legend_y}" y2="{legend_y}" stroke="#6b7280" stroke-width="2" stroke-dasharray="7 5"/>')
-parts.append(svg_text(1001, legend_y + 5, "U=0 GS D100", size=12, anchor="start"))
-parts.append(f'<rect x="1135" y="600" width="10" height="10" fill="#ffffff" stroke="#6b7280" stroke-width="2"/>')
-parts.append(svg_text(1152, legend_y + 5, "U=0 GS D200 center", size=12, anchor="start"))
+parts.append(svg_text(1001, legend_y + 5, u0_label.split(" (")[0] if u0_reference_path else "U=0 GS D100", size=12, anchor="start"))
+if not u0_reference_path:
+    parts.append(f'<rect x="1135" y="600" width="10" height="10" fill="#ffffff" stroke="#6b7280" stroke-width="2"/>')
+    parts.append(svg_text(1152, legend_y + 5, "U=0 GS D200 center", size=12, anchor="start"))
 parts.append(f'<line x1="1390" x2="1414" y1="{legend_y}" y2="{legend_y}" stroke="{slope_colors["odd"]}" stroke-width="2"/>')
 parts.append(svg_text(1421, legend_y + 5, "|odd slope|", size=12, anchor="start"))
 parts.append(f'<line x1="1530" x2="1554" y1="{legend_y}" y2="{legend_y}" stroke="{slope_colors["even"]}" stroke-width="2"/>')
