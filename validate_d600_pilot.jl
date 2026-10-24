@@ -3,6 +3,8 @@ using ITensors, ITensorMPS, JLD2, Statistics, Printf
 const TDS = (0.98, 1.0, 1.02)
 const IDS = 1:4
 const TIMES = collect(0:0.1:12)
+const DS = isempty(ARGS) ? (400, 600) : (400, 600, 800)
+const PAIRS = isempty(ARGS) ? ((400, 600),) : ((400, 600), (600, 800), (400, 800))
 
 function paths(td, id, dmax)
     base = joinpath(@__DIR__, "trajectory_evolution",
@@ -55,9 +57,9 @@ end
 at(t) = round(Int, 10t) + 1
 paired(v) = (mean(v), std(v) / sqrt(length(v)))
 
-data = Dict((d, td, id) => read_one(td, id, d) for d in (400, 600), td in TDS, id in IDS)
-println("VALIDATED 24 paired result/checkpoint files: 12 D400 + 12 D600")
-for d in (400, 600)
+data = Dict((d, td, id) => read_one(td, id, d) for d in DS, td in TDS, id in IDS)
+println("VALIDATED $(length(data)) result/checkpoint pairs across D=$(join(DS, ","))")
+for d in DS
     rows = [data[d, td, id] for td in TDS for id in IDS]
     @printf("D=%d max_norm_error=%.3g p_jump=[%.6g,%.6g] branch_weight=[%.6g,%.6g] final_bond=[%d,%d] center_bond=[%d,%d] min_s=[%.3g,%.3g] tail10_sq=[%.3g,%.3g]\n",
         d, maximum(r.norm_error for r in rows), minimum(minimum(r.probs) for r in rows),
@@ -68,18 +70,18 @@ for d in (400, 600)
         maximum(r.min_s for r in rows), minimum(r.tail10 for r in rows),
         maximum(r.tail10 for r in rows))
 end
-println("tD,parity,time,D400_mean,D600_mean,paired_delta,paired_SE,jump_mismatch_steps")
-for td in TDS, parity in (:odd, :even), t in (2, 4, 6, 10, 12)
-    x = [getproperty(data[400, td, id], parity)[at(t)] for id in IDS]
-    y = [getproperty(data[600, td, id], parity)[at(t)] for id in IDS]
+println("Dlo,Dhi,tD,parity,time,lo_mean,hi_mean,paired_delta,paired_SE,jump_mismatch_steps")
+for (lo, hi) in PAIRS, td in TDS, parity in (:odd, :even), t in (2, 4, 6, 10, 12)
+    x = [getproperty(data[lo, td, id], parity)[at(t)] for id in IDS]
+    y = [getproperty(data[hi, td, id], parity)[at(t)] for id in IDS]
     mu, se = paired(y .- x)
-    mismatches = sum(count(p -> p[1] != p[2], zip(data[400, td, id].jumps, data[600, td, id].jumps)) for id in IDS)
-    @printf("%.2f,%s,%d,%.9g,%.9g,%+.9g,%.9g,%d\n", td, parity, t,
+    mismatches = sum(count(p -> p[1] != p[2], zip(data[lo, td, id].jumps, data[hi, td, id].jumps)) for id in IDS)
+    @printf("%d,%d,%.2f,%s,%d,%.9g,%.9g,%+.9g,%.9g,%d\n", lo, hi, td, parity, t,
         mean(x), mean(y), mu, se, mismatches)
 end
-for parity in (:odd, :even), t in (2, 4, 6, 10, 12)
-    x = [(getproperty(data[400, 1.02, id], parity)[at(t)] - getproperty(data[400, 0.98, id], parity)[at(t)]) / 0.04 for id in IDS]
-    y = [(getproperty(data[600, 1.02, id], parity)[at(t)] - getproperty(data[600, 0.98, id], parity)[at(t)]) / 0.04 for id in IDS]
+for (lo, hi) in PAIRS, parity in (:odd, :even), t in (2, 4, 6, 10, 12)
+    x = [(getproperty(data[lo, 1.02, id], parity)[at(t)] - getproperty(data[lo, 0.98, id], parity)[at(t)]) / 0.04 for id in IDS]
+    y = [(getproperty(data[hi, 1.02, id], parity)[at(t)] - getproperty(data[hi, 0.98, id], parity)[at(t)]) / 0.04 for id in IDS]
     mu, se = paired(y .- x)
-    @printf("slope,%s,%d,D400=%.9g,D600=%.9g,delta=%+.9g,se=%.9g\n", parity, t, mean(x), mean(y), mu, se)
+    @printf("slope,%d,%d,%s,%d,lo=%.9g,hi=%.9g,delta=%+.9g,se=%.9g\n", lo, hi, parity, t, mean(x), mean(y), mu, se)
 end
