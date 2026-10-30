@@ -3,8 +3,10 @@ using ITensors, ITensorMPS, JLD2, Statistics, Printf
 const TDS = (0.98, 1.0, 1.02)
 const IDS = 1:4
 const TIMES = collect(0:0.1:12)
-const DS = isempty(ARGS) ? (400, 600) : (400, 600, 800)
-const PAIRS = isempty(ARGS) ? ((400, 600),) : ((400, 600), (600, 800), (400, 800))
+const DTOP = isempty(ARGS) ? 600 : parse(Int, only(ARGS))
+DTOP in (600, 800, 1200) || error("supported maximum D: 600, 800, 1200")
+const DS = filter(d -> d <= DTOP, (400, 600, 800, 1200))
+const PAIRS = [(lo, hi) for hi in DS for lo in DS if lo < hi]
 
 function paths(td, id, dmax)
     base = joinpath(@__DIR__, "trajectory_evolution",
@@ -21,7 +23,10 @@ function read_one(td, id, dmax)
     a = d["args"]
     for (key, value) in (("N", 10), ("U", 10.0), ("tD", td), ("Dmax", dmax),
         ("Dload", 400), ("dt", 0.025), ("tsmax", 480), ("measure-every", 4),
-        ("seed", 260903), ("traj-start", id), ("ntraj", 1))
+        ("seed", 260903), ("traj-start", id), ("ntraj", 1),
+        ("t1", 0.1), ("t2", 0.2), ("tR", 1.0), ("J", 0.0),
+        ("I1", 0.1), ("I2", 0.1), ("IR", 0.1), ("ID", 0.1),
+        ("Dstep", 50), ("Dstepload", 50), ("cutoff", 1e-8))
         a[key] == value || error("$result: $key=$(a[key]), expected $value")
     end
     d["completed_trajectories"] == 1 || error("incomplete $result")
@@ -41,7 +46,7 @@ function read_one(td, id, dmax)
     all(j -> 0 <= j <= 160, jumps) || error("invalid jump indices $result")
     all(b -> 1 <= b <= dmax, bonds) || error("invalid bonds $result")
     psi = load(checkpoint, "psi")
-    hasqns(first(siteinds(psi))) || error("non-QN checkpoint $checkpoint")
+    length(psi) == 20 && all(hasqns, siteinds(psi)) || error("invalid sites/QN checkpoint $checkpoint")
     norm_error = abs(norm(psi) - 1)
     norm_error < 1e-8 || error("norm error $norm_error in $checkpoint")
     maxlinkdim(psi) == bonds[end] || error("checkpoint/result bond mismatch $checkpoint")
@@ -58,6 +63,9 @@ at(t) = round(Int, 10t) + 1
 paired(v) = (mean(v), std(v) / sqrt(length(v)))
 
 data = Dict((d, td, id) => read_one(td, id, d) for d in DS, td in TDS, id in IDS)
+for td in TDS, id in IDS, d in DS, parity in (:odd, :even)
+    abs(first(getproperty(data[d, td, id], parity)) - first(getproperty(data[400, td, id], parity))) < 1e-10 || error("initial SO mismatch")
+end
 println("VALIDATED $(length(data)) result/checkpoint pairs across D=$(join(DS, ","))")
 for d in DS
     rows = [data[d, td, id] for td in TDS for id in IDS]
@@ -70,6 +78,19 @@ for d in DS
         maximum(r.min_s for r in rows), minimum(r.tail10 for r in rows),
         maximum(r.tail10 for r in rows))
 end
+
+# Save every measurement time, including the shared initial-state check.
+out = joinpath(@__DIR__, "experiment_results", "N10_U10_D$(DTOP)_paired_timecurves.csv")
+open(out, "w") do io
+    println(io, "Dlo,Dhi,tD,parity,time,lo_mean,hi_mean,paired_delta,paired_SE")
+    for (lo, hi) in PAIRS, td in TDS, parity in (:odd, :even), (k, t) in enumerate(TIMES)
+        x = [getproperty(data[lo, td, id], parity)[k] for id in IDS]
+        y = [getproperty(data[hi, td, id], parity)[k] for id in IDS]
+        mu, se = paired(y .- x)
+        println(io, join((lo, hi, td, parity, t, mean(x), mean(y), mu, se), ','))
+    end
+end
+println("FULL_TIME_CURVES $out")
 println("Dlo,Dhi,tD,parity,time,lo_mean,hi_mean,paired_delta,paired_SE,jump_mismatch_steps")
 for (lo, hi) in PAIRS, td in TDS, parity in (:odd, :even), t in (2, 4, 6, 10, 12)
     x = [getproperty(data[lo, td, id], parity)[at(t)] for id in IDS]
