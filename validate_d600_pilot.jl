@@ -4,8 +4,8 @@ const TDS = (0.98, 1.0, 1.02)
 const IDS = 1:4
 const TIMES = collect(0:0.1:12)
 const DTOP = isempty(ARGS) ? 600 : parse(Int, only(ARGS))
-DTOP in (600, 800, 1200) || error("supported maximum D: 600, 800, 1200")
-const DS = filter(d -> d <= DTOP, (400, 600, 800, 1200))
+DTOP in (600, 800, 1200, 1600) || error("supported maximum D: 600, 800, 1200, 1600")
+const DS = filter(d -> d <= DTOP, (400, 600, 800, 1200, 1600))
 const PAIRS = [(lo, hi) for hi in DS for lo in DS if lo < hi]
 
 function paths(td, id, dmax)
@@ -106,3 +106,20 @@ for (lo, hi) in PAIRS, parity in (:odd, :even), t in (2, 4, 6, 10, 12)
     mu, se = paired(y .- x)
     @printf("slope,%d,%d,%s,%d,lo=%.9g,hi=%.9g,delta=%+.9g,se=%.9g\n", lo, hi, parity, t, mean(x), mean(y), mu, se)
 end
+
+# Per-file audit and paired samples retain evidence for independent report checks.
+open(joinpath(@__DIR__, "experiment_results", "N10_U10_D$(DTOP)_file_audit.csv"), "w") do io
+    println(io, "D,tD,id,norm_error,p_min,p_max,weight_min,weight_max,final_bond,center_dim,min_retained_s,retained_tail10_sq")
+    for d in DS, td in TDS, id in IDS
+        r = data[d,td,id]
+        println(io, join((d,td,id,r.norm_error,minimum(r.probs),maximum(r.probs),minimum(r.weights),maximum(r.weights),last(r.bonds),r.center_dim,r.min_s,r.tail10), ','))
+    end
+end
+open(joinpath(@__DIR__, "experiment_results", "N10_U10_D$(DTOP)_trajectory_timecurves.csv"), "w") do io
+    println(io, "D,tD,id,time,odd,even,bond")
+    for d in DS, td in TDS, id in IDS, (k,t) in enumerate(TIMES)
+        r = data[d,td,id]
+        println(io, join((d,td,id,t,r.odd[k],r.even[k],r.bonds[k]), ','))
+    end
+end
+println("AUDIT_AND_SAMPLES_SAVED")
